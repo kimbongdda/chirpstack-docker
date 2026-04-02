@@ -1,0 +1,1591 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>LoRa Dashboard</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { 
+      font-family: 'Segoe UI', sans-serif; 
+      margin: 0;
+      padding: 15px;
+      background: #f0f2f5; 
+    }
+    
+    .header {
+      background: white;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 15px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    
+    h1 { 
+      font-size: 24px; 
+      color: #333; 
+      margin: 0 0 5px 0;
+    }
+    
+    .subtitle {
+      color: #666; 
+      font-size: 12px; 
+      margin: 0;
+    }
+    
+    h2 { 
+      font-size: 14px; 
+      margin: 0 0 10px 0; 
+      color: #333;
+      font-weight: 600;
+    }
+    
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      grid-gap: 10px;
+      margin-bottom: 15px;
+    }
+    
+    .stat-box {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 12px;
+      border-radius: 6px;
+      text-align: center;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .stat-box .value { 
+      font-size: 20px; 
+      font-weight: bold; 
+    }
+    
+    .stat-box .label { 
+      font-size: 11px; 
+      opacity: 0.9;
+      margin-top: 3px;
+    }
+    
+    /* 차트 그리드 - 반응형 */
+    .chart-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      grid-gap: 12px;
+      margin-bottom: 15px;
+    }
+    
+    .card {
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 12px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+      background: white;
+      min-height: 250px;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .card h2 {
+      margin-top: 0;
+    }
+    
+    .card-content {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .card-note {
+      font-size: 11px;
+      color: #999;
+      margin: 0 0 8px 0;
+    }
+    
+    canvas { 
+      width: 100% !important; 
+      height: auto !important;
+      max-height: 220px !important;
+    }
+    
+    /* 모달 스타일 */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0,0,0,0.4);
+      animation: fadeIn 0.3s;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    
+    .modal.show {
+      display: block;
+    }
+    
+    .modal-content {
+      background-color: white;
+      margin: 10% auto;
+      padding: 20px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      width: 80%;
+      max-width: 700px;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
+    
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #667eea;
+    }
+    
+    .modal-header h2 {
+      margin: 0;
+      color: #333;
+    }
+    
+    .close-btn {
+      font-size: 24px;
+      font-weight: bold;
+      color: #999;
+      cursor: pointer;
+      border: none;
+      background: none;
+      padding: 0;
+    }
+    
+    .close-btn:hover {
+      color: #333;
+    }
+
+    .modal-map .modal-content {
+      width: 92%;
+      max-width: 1100px;
+      max-height: 90vh;
+      margin: 4% auto;
+    }
+    #gwMapContainer {
+      width: 100%;
+      height: 500px;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .map-no-gps {
+      padding: 40px;
+      text-align: center;
+      color: #94a3b8;
+      font-size: 14px;
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-gap: 15px;
+      margin-bottom: 15px;
+    }
+    
+    .info-item {
+      background: #f9f9f9;
+      padding: 10px;
+      border-radius: 4px;
+      border-left: 3px solid #667eea;
+    }
+    
+    .info-label {
+      font-size: 11px;
+      color: #999;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-bottom: 3px;
+    }
+    
+    .info-value {
+      font-size: 13px;
+      color: #333;
+      font-weight: 500;
+      word-break: break-all;
+    }
+    
+    .badge {
+      display: inline-block;
+      background: #e8f0ff;
+      color: #667eea;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 10px;
+      margin: 2px;
+      font-weight: 500;
+    }
+    
+    /* 테이블 스타일 */
+    .table-container {
+      background: white;
+      border-radius: 6px;
+      overflow: hidden;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+      margin-bottom: 20px;
+    }
+    
+    .table-title {
+      padding: 12px;
+      border-bottom: 1px solid #ddd;
+      background: #f9f9f9;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .table-title h2 {
+      margin: 0;
+    }
+    
+    .node-tab {
+      display: inline-block;
+      padding: 6px 12px;
+      margin-left: 10px;
+      background: #e8f0ff;
+      color: #667eea;
+      border: 1px solid #667eea;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    
+    .node-tab.active {
+      background: #667eea;
+      color: white;
+    }
+    
+    .node-tab:hover {
+      background: #667eea;
+      color: white;
+    }
+    
+    .node-info-btn {
+      padding: 4px 8px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    
+    .node-info-btn:hover {
+      background: #764ba2;
+    }
+    
+    .table-content {
+      max-height: 600px;
+      overflow-y: auto;
+    }
+    
+    table { 
+      border-collapse: collapse; 
+      width: 100%; 
+      font-size: 12px; 
+    }
+    
+    th, td { 
+      border: 1px solid #e0e0e0; 
+      padding: 6px 8px; 
+      text-align: left; 
+    }
+    
+    th { 
+      background: #2c3e50; 
+      color: white; 
+      position: sticky; 
+      top: 0; 
+      font-weight: 600;
+      font-size: 11px;
+    }
+    
+    tbody tr:nth-child(odd) { background: #fafafa; }
+    tbody tr:nth-child(even) { background: #fff; }
+    
+    .payload { 
+      font-family: monospace; 
+      font-size: 11px; 
+    }
+    
+    .collision { 
+      background-color: #ffe6e6 !important; 
+      font-weight: bold;
+      color: #c41e3a;
+    }
+    
+    .small { 
+      color: #666; 
+      font-size: 11px; 
+    }
+    
+    /* 그래프 영역 */
+    .graphs-section {
+      background: white;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 15px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    
+    .graph-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #667eea;
+    }
+    
+    .graph-header h2 {
+      margin: 0;
+    }
+    
+    .chart-selector {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    
+    .chart-selector label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #333;
+    }
+    
+    .chart-selector select {
+      padding: 6px 10px;
+      border: 2px solid #667eea;
+      border-radius: 4px;
+      font-size: 12px;
+      background: white;
+      cursor: pointer;
+    }
+    
+    .chart-selector select:hover {
+      border-color: #764ba2;
+    }
+    
+    .charts-container {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-gap: 15px;
+      margin-bottom: 15px;
+    }
+    
+    .chart-card {
+      background: #f9f9f9;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      padding: 10px;
+      min-height: 280px;
+    }
+    
+    .chart-card h3 {
+      font-size: 13px;
+      margin: 0 0 10px 0;
+      color: #333;
+      font-weight: 600;
+    }
+    
+    .chart-card canvas {
+      max-height: 250px !important;
+    }
+    
+    /* 데이터 테이블 영역 */
+    .data-section {
+      background: white;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    
+    .data-header {
+      padding: 12px;
+      border-bottom: 1px solid #ddd;
+      background: #f9f9f9;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .data-header h2 {
+      margin: 0;
+    }
+    
+    .node-tabs-container {
+      display: flex;
+      gap: 5px;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      scrollbar-width: thin;
+      scrollbar-color: #667eea #f1f5f9;
+      max-width: 70%;
+    }
+    .node-tabs-container::-webkit-scrollbar {
+      height: 4px;
+    }
+    .node-tabs-container::-webkit-scrollbar-track {
+      background: #f1f5f9;
+      border-radius: 2px;
+    }
+    .node-tabs-container::-webkit-scrollbar-thumb {
+      background: #667eea;
+      border-radius: 2px;
+    }
+    
+    .node-tab-btn {
+      padding: 6px 12px;
+      background: #e8f0ff;
+      color: #667eea;
+      border: 1px solid #667eea;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      transition: all 0.3s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    
+    .node-tab-btn:hover {
+      background: #667eea;
+      color: white;
+    }
+    
+    .node-tab-btn.active {
+      background: #667eea;
+      color: white;
+    }
+    
+    .data-content {
+      padding: 0;
+      max-height: 380px;
+      overflow-y: auto;
+    }
+    .events-table thead th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    
+    .events-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    
+    .events-table thead {
+      background: #2c3e50;
+      color: white;
+      position: sticky;
+      top: 0;
+    }
+    
+    .events-table th {
+      padding: 8px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 11px;
+      border: 1px solid #34495e;
+    }
+    
+    .events-table td {
+      padding: 6px 8px;
+      border: 1px solid #e0e0e0;
+    }
+    
+    .events-table tbody tr:nth-child(odd) {
+      background: #fafafa;
+    }
+    
+    .events-table tbody tr:nth-child(even) {
+      background: #fff;
+    }
+    
+    .events-table tbody tr.collision {
+      background-color: #ffe6e6 !important;
+      color: #c41e3a;
+      font-weight: bold;
+    }
+    
+    .status {
+      text-align: center;
+      font-weight: bold;
+    }
+    
+    .status.collision {
+      color: #c41e3a;
+      background-color: #ffcccc !important;
+    }
+    
+    .info-btn {
+      padding: 3px 6px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 500;
+    }
+    
+    .info-btn:hover {
+      background: #764ba2;
+    }
+    
+    .payload-cell {
+      font-family: monospace;
+      font-size: 10px;
+      max-width: 150px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    
+    /* 반응형 조정 */
+    @media (max-width: 1024px) {
+      .charts-container {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Leaflet.js (지도) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+  <div class="header" style="display:flex;justify-content:space-between;align-items:center;">
+    <div>
+      <h1>LoRa 실시간 모니터링 대시보드</h1>
+      <p class="subtitle">
+        실시간 uplink 모니터링 | 충돌 감지: 프레임 카운터 갭 발생 시 SNR 바가 빨간색으로 표시됨
+      </p>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <a href="/history" style="padding:10px 20px;background:#f1f5f9;color:#475569;border:1.5px solid #cbd5e1;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;">수신 기록</a>
+      <a href="/nodes" style="padding:10px 20px;background:#f1f5f9;color:#475569;border:1.5px solid #cbd5e1;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;">노드 관리</a>
+    </div>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-box">
+      <div class="label">총 이벤트</div>
+      <div class="value" id="statEvents">-</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">활성 노드</div>
+      <div class="value" id="statDevices">-</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">활성 게이트웨이</div>
+      <div class="value" id="statGateways">-</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">평균 SNR</div>
+      <div class="value" id="statSNR">-</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">평균 RSSI</div>
+      <div class="value" id="statRSSI">-</div>
+    </div>
+    <div class="stat-box" style="background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);">
+      <div class="label">감지된 충돌</div>
+      <div class="value" id="statCollisions">0</div>
+    </div>
+  </div>
+
+  <!-- 게이트웨이 목록 -->
+  <div class="graphs-section" id="gatewaySection">
+    <div class="graph-header" style="display:flex;justify-content:space-between;align-items:center;">
+      <h2>게이트웨이 목록</h2>
+      <button onclick="openGwMap()" style="padding:7px 16px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">🗺 지도 보기</button>
+    </div>
+    <div id="gatewayCards" style="display:flex;flex-wrap:wrap;gap:12px;"></div>
+  </div>
+
+
+  <!-- 그래프 영역 -->
+  <div class="graphs-section">
+    <div class="graph-header">
+      <h2>노드별 실시간 그래프</h2>
+      <div class="chart-selector">
+        <label for="nodeGraphSelect">노드 선택:</label>
+        <select id="nodeGraphSelect">
+          <option value="all">전체 노드</option>
+        </select>
+      </div>
+    </div>
+    
+    <div class="charts-container">
+      <div class="chart-card">
+        <h3>SNR 추이</h3>
+        <canvas id="snrChart"></canvas>
+      </div>
+      
+      <div class="chart-card">
+        <h3>충돌 감지</h3>
+        <canvas id="collisionChart"></canvas>
+      </div>
+      
+      <div class="chart-card">
+        <h3>SF 분포</h3>
+        <canvas id="sfChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- 데이터 테이블 영역 -->
+  <div class="data-section">
+    <div class="data-header">
+      <h2 id="tableTitle">최근 데이터</h2>
+      <div class="node-tabs-container" id="nodeTabsContainer"></div>
+    </div>
+
+    <div class="data-content">
+      <table class="events-table">
+        <thead>
+          <tr>
+            <th>시간</th>
+            <th id="thNode" style="display:none;">노드</th>
+            <th>FCnt</th>
+            <th>SF</th>
+            <th>주파수</th>
+            <th>RSSI</th>
+            <th>SNR</th>
+            <th style="width:48px;min-width:48px;">상태</th>
+            <th>정보</th>
+            <th>Payload</th>
+          </tr>
+        </thead>
+        <tbody id="events-body">
+        </tbody>
+      </table>
+    </div>
+    
+    <!-- 🔴 충돌 감지 상세 정보 -->
+    <div class="collision-section" style="margin-top: 20px;">
+      <div class="data-header">
+        <h2>🔴 충돌 감지 상세 정보</h2>
+      </div>
+      <div class="data-content">
+        <div id="collisionDetails" style="padding: 15px; background: #fff9f9; border-left: 4px solid #ff6b6b;">
+          <p id="collisionNoData" style="color: #999; text-align: center; padding: 20px;">
+            충돌이 감지되지 않았습니다.
+          </p>
+          <table class="events-table" id="collisionTable" style="display: none;">
+            <thead>
+              <tr>
+                <th>시간</th>
+                <th>노드</th>
+                <th>FCnt</th>
+                <th>게이트웨이</th>
+                <th>충돌 원인</th>
+                <th>SNR</th>
+              </tr>
+            </thead>
+            <tbody id="collision-body">
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>  <!-- 노드 정보 모달 -->
+  <div id="nodeModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="modalNodeName">노드 정보</h2>
+        <button class="close-btn" onclick="closeNodeModal()">×</button>
+      </div>
+      <div class="info-grid" id="modalNodeInfo"></div>
+    </div>
+  </div>
+
+  <!-- 게이트웨이 정보 모달 -->
+  <div id="gwModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="modalGwName">게이트웨이 정보</h2>
+        <button class="close-btn" onclick="closeGwModal()">×</button>
+      </div>
+      <div class="info-grid" id="modalGwInfo"></div>
+    </div>
+  </div>
+
+  <!-- 게이트웨이 지도 모달 -->
+  <div id="gwMapModal" class="modal modal-map">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>게이트웨이 위치 지도</h2>
+        <button class="close-btn" onclick="closeGwMap()">×</button>
+      </div>
+      <div id="gwMapContainer"></div>
+      <div id="gwMapNoGps" class="map-no-gps" style="display:none;">
+        📡 GPS 정보가 있는 게이트웨이가 없습니다.<br>
+        <span style="font-size:12px;">ChirpStack admin에서 게이트웨이 위치를 설정하거나, GPS 모듈이 탑재된 게이트웨이를 사용하세요.</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let snrChart, sfChart, collisionChart;
+    let currentNode = null; // null = 전체 탭
+    let allNodes = [];
+    let selectedGraphNode = 'all';
+    let allEvents = [];
+    let lastSummary = null;
+
+    function createOrUpdateChart(chartRef, ctx, type, data, options) {
+      if (chartRef) {
+        chartRef.data = data;
+        chartRef.options = options || {};
+        chartRef.update('none');
+        return chartRef;
+      } else {
+        return new Chart(ctx, {
+          type: type,
+          data: data,
+          options: options || {}
+        });
+      }
+    }
+
+    // 모달 함수들
+    function showNodeModal(devEui, devName) {
+      fetch(`/api/nodes`)
+        .then(r => r.json())
+        .then(nodes => {
+          const node = nodes.find(n => n.dev_eui === devEui);
+          if (!node) return;
+          
+          document.getElementById('modalNodeName').textContent = `📍 ${node.dev_name || devEui}`;
+          
+          const avgRssi = node.rssi.length ? (node.rssi.reduce((a,b) => a+b, 0) / node.rssi.length).toFixed(1) : '-';
+          const avgSnr = node.snr.length ? (node.snr.reduce((a,b) => a+b, 0) / node.snr.length).toFixed(1) : '-';
+          
+          const html = `
+            <div class="info-item">
+              <div class="info-label">DevEUI</div>
+              <div class="info-value">${node.dev_eui}</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">DevAddr</div>
+              <div class="info-value">${node.dev_addr || '-'}</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">마지막 수신</div>
+              <div class="info-value">${node.last_seen}</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">SF</div>
+              <div class="info-value">${node.sf || '-'}</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">주파수</div>
+              <div class="info-value">${node.frequency_mhz || '-'} MHz</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">평균 RSSI</div>
+              <div class="info-value">${avgRssi} dBm</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">평균 SNR</div>
+              <div class="info-value">${avgSnr} dB</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">연결 게이트웨이</div>
+              <div class="info-value">
+                ${node.gateways.map(gw => `<span class="badge">${gw}</span>`).join('')}
+              </div>
+            </div>
+          `;
+          
+          document.getElementById('modalNodeInfo').innerHTML = html;
+          document.getElementById('nodeModal').classList.add('show');
+        });
+    }
+
+    function closeNodeModal() {
+      document.getElementById('nodeModal').classList.remove('show');
+    }
+
+    function showGwModal(gwId) {
+      fetch(`/api/gateways`)
+        .then(r => r.json())
+        .then(gws => {
+          const gw = gws.find(g => g.gateway_id === gwId);
+          if (!gw) return;
+          
+          document.getElementById('modalGwName').textContent = `📡 ${gw.name || gwId}`;
+
+          const stateColor = gw.state === 'ONLINE' ? '#22c55e' : gw.state === 'OFFLINE' ? '#ef4444' : '#94a3b8';
+          const html = `
+            <div class="info-item">
+              <div class="info-label">Gateway ID</div>
+              <div class="info-value">${gw.gateway_id}</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">이름</div>
+              <div class="info-value">${gw.name || '-'}</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">상태</div>
+              <div class="info-value" style="color:${stateColor};font-weight:bold">${gw.state || '-'}</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">설명</div>
+              <div class="info-value">${gw.description || '-'}</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">ChirpStack Last Seen</div>
+              <div class="info-value">${gw.last_seen_at || '-'}</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">메시지 수 (금일)</div>
+              <div class="info-value">${gw.message_count}</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">평균 RSSI</div>
+              <div class="info-value">${gw.avg_rssi !== null ? gw.avg_rssi + ' dBm' : '-'}</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">평균 SNR</div>
+              <div class="info-value">${gw.avg_snr !== null ? gw.avg_snr + ' dB' : '-'}</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">마지막 수신 (MQTT)</div>
+              <div class="info-value">${gw.last_seen || '-'}</div>
+            </div>
+            ${gw.location ? `
+            <div class="info-item">
+              <div class="info-label">위도 (Lat)</div>
+              <div class="info-value">${gw.location.latitude.toFixed(6)}</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">경도 (Lon)</div>
+              <div class="info-value">${gw.location.longitude.toFixed(6)}</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">고도 (Alt)</div>
+              <div class="info-value">${gw.location.altitude !== null && gw.location.altitude !== undefined ? gw.location.altitude.toFixed(1) + ' m' : '-'}</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">GPS 출처</div>
+              <div class="info-value">${gw.location.source}</div>
+            </div>
+            <div class="info-item" style="grid-column:span 2">
+              <div class="info-label">지도</div>
+              <div class="info-value">
+                <a href="https://www.openstreetmap.org/?mlat=${gw.location.latitude}&mlon=${gw.location.longitude}&zoom=15" target="_blank" style="color:#667eea;text-decoration:none;font-weight:600;">OpenStreetMap ↗</a>
+                &nbsp;|&nbsp;
+                <a href="https://maps.google.com/?q=${gw.location.latitude},${gw.location.longitude}" target="_blank" style="color:#667eea;text-decoration:none;font-weight:600;">Google Maps ↗</a>
+              </div>
+            </div>
+            ` : `
+            <div class="info-item" style="grid-column:span 2">
+              <div class="info-label">GPS</div>
+              <div class="info-value" style="color:#94a3b8;">위치 정보 없음 (ChirpStack admin에서 설정 가능)</div>
+            </div>
+            `}
+          `;
+
+          document.getElementById('modalGwInfo').innerHTML = html;
+          document.getElementById('gwModal').classList.add('show');
+        });
+    }
+
+    function closeGwModal() {
+      document.getElementById('gwModal').classList.remove('show');
+    }
+
+    // ===== 게이트웨이 지도 =====
+    let _gwMap = null;
+    let _gwMarkers = [];
+
+    function openGwMap() {
+      const modal = document.getElementById('gwMapModal');
+      modal.classList.add('show');
+
+      fetch('/api/gateways')
+        .then(r => r.json())
+        .then(gws => {
+          const withGps = gws.filter(g => g.location);
+          const noGpsDiv = document.getElementById('gwMapNoGps');
+          const mapDiv   = document.getElementById('gwMapContainer');
+
+          if (withGps.length === 0) {
+            mapDiv.style.display   = 'none';
+            noGpsDiv.style.display = 'block';
+            return;
+          }
+          mapDiv.style.display   = 'block';
+          noGpsDiv.style.display = 'none';
+
+          // 지도 초기화 (최초 1회)
+          if (!_gwMap) {
+            _gwMap = L.map('gwMapContainer');
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+              attribution: '© OpenStreetMap contributors',
+              maxZoom: 19,
+            }).addTo(_gwMap);
+          } else {
+            // 기존 마커 제거
+            _gwMarkers.forEach(m => _gwMap.removeLayer(m));
+            _gwMarkers = [];
+          }
+
+          // 범례 제거 후 재생성
+          const existingLegend = document.getElementById('gwMapLegend');
+          if (existingLegend) existingLegend.remove();
+
+          // GW별 고유 색상 팔레트
+          const GW_COLORS = ['#667eea','#f59e0b','#10b981','#ef4444','#8b5cf6','#06b6d4','#f97316','#ec4899','#14b8a6','#6366f1'];
+
+          const bounds = [];
+          withGps.forEach((gw, idx) => {
+            const lat = gw.location.latitude;
+            const lon = gw.location.longitude;
+            const stateColor = gw.state === 'ONLINE' ? '#22c55e' : gw.state === 'OFFLINE' ? '#ef4444' : '#94a3b8';
+            const gwColor = GW_COLORS[idx % GW_COLORS.length];
+            const label = idx + 1; // 마커 번호
+
+            const icon = L.divIcon({
+              className: '',
+              html: `<div style="
+                position:relative;display:flex;flex-direction:column;align-items:center;">
+                <div style="
+                  background:${gwColor};width:30px;height:30px;
+                  border-radius:50%;border:3px solid white;
+                  box-shadow:0 2px 6px rgba(0,0,0,0.4);
+                  display:flex;align-items:center;justify-content:center;
+                  font-size:13px;font-weight:700;color:white;line-height:1;">
+                  ${label}
+                </div>
+                <div style="
+                  background:${gwColor};color:white;
+                  font-size:11px;font-weight:600;
+                  padding:2px 6px;border-radius:4px;margin-top:3px;
+                  white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,0.3);
+                  max-width:120px;overflow:hidden;text-overflow:ellipsis;">
+                  ${gw.name || gw.gateway_id}
+                </div>
+                <div style="
+                  width:8px;height:8px;border-radius:50%;
+                  background:${stateColor};border:2px solid white;
+                  position:absolute;top:0;right:0;
+                  box-shadow:0 1px 3px rgba(0,0,0,0.4);">
+                </div>
+              </div>`,
+              iconSize: [30, 52],
+              iconAnchor: [15, 15],
+            });
+
+            const marker = L.marker([lat, lon], { icon })
+              .bindPopup(`
+                <b><span style="color:${gwColor};">■</span> 📡 ${gw.name || gw.gateway_id}</b><br>
+                ID: <code>${gw.gateway_id}</code><br>
+                상태: <span style="color:${stateColor};font-weight:bold;">${gw.state}</span><br>
+                위도: ${lat.toFixed(6)}<br>
+                경도: ${lon.toFixed(6)}<br>
+                ${gw.location.altitude !== null && gw.location.altitude !== undefined ? '고도: ' + gw.location.altitude.toFixed(1) + ' m<br>' : ''}
+                출처: ${gw.location.source}<br>
+                RSSI: ${gw.avg_rssi !== null ? gw.avg_rssi + ' dBm' : '-'} |
+                SNR: ${gw.avg_snr !== null ? gw.avg_snr + ' dB' : '-'}
+              `)
+              .addTo(_gwMap);
+            _gwMarkers.push(marker);
+            bounds.push([lat, lon]);
+          });
+
+          // 범례 패널 생성
+          const legend = document.createElement('div');
+          legend.id = 'gwMapLegend';
+          legend.style.cssText = 'position:absolute;bottom:16px;left:16px;z-index:1000;background:white;border-radius:8px;padding:10px 14px;box-shadow:0 2px 8px rgba(0,0,0,0.15);font-size:12px;max-width:200px;';
+          legend.innerHTML = '<div style="font-weight:700;margin-bottom:6px;color:#1e293b;">게이트웨이</div>' +
+            withGps.map((gw, idx) => {
+              const c = GW_COLORS[idx % GW_COLORS.length];
+              const stC = gw.state === 'ONLINE' ? '#22c55e' : gw.state === 'OFFLINE' ? '#ef4444' : '#94a3b8';
+              return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                <div style="background:${c};color:white;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;">${idx+1}</div>
+                <div style="overflow:hidden;">
+                  <div style="font-weight:600;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${gw.name || gw.gateway_id}</div>
+                  <div style="color:${stC};font-size:11px;">${gw.state || 'UNKNOWN'}</div>
+                </div>
+              </div>`;
+            }).join('');
+          document.getElementById('gwMapContainer').style.position = 'relative';
+          document.getElementById('gwMapContainer').appendChild(legend);
+
+          // 모든 마커가 보이도록 뷰 조정
+          if (bounds.length === 1) {
+            _gwMap.setView(bounds[0], 14);
+          } else {
+            _gwMap.fitBounds(bounds, { padding: [40, 40] });
+          }
+
+          // 모달이 열린 후 지도 크기 재계산 (Leaflet 필수)
+          setTimeout(() => _gwMap.invalidateSize(), 100);
+        });
+    }
+
+    function closeGwMap() {
+      document.getElementById('gwMapModal').classList.remove('show');
+    }
+
+    document.getElementById('gwMapModal').addEventListener('click', e => {
+      if (e.target.id === 'gwMapModal') closeGwMap();
+    });
+
+    // 노드 탭 생성
+    function updateNodeTabs(nodes) {
+      allNodes = nodes;
+      const tabsDiv = document.getElementById('nodeTabsContainer');
+
+      // 현재 탭의 devEui 목록
+      const existingEuis = Array.from(tabsDiv.querySelectorAll('.node-tab-btn'))
+                                .map(t => t.dataset.devEui);
+      const newEuis = ['__all__', ...nodes.map(n => n.dev_eui)];
+      const needsRebuild = JSON.stringify(existingEuis) !== JSON.stringify(newEuis);
+
+      if (needsRebuild) {
+        tabsDiv.innerHTML = '';
+
+        // "전체" 탭
+        const allTab = document.createElement('button');
+        allTab.className = 'node-tab-btn';
+        allTab.dataset.devEui = '__all__';
+        allTab.textContent = '전체';
+        allTab.onclick = () => switchNode(null);
+        tabsDiv.appendChild(allTab);
+
+        nodes.forEach(node => {
+          const tab = document.createElement('button');
+          tab.className = 'node-tab-btn';
+          tab.dataset.devEui = node.dev_eui;
+          tab.textContent = node.dev_name || node.dev_eui.substring(0, 8);
+          tab.onclick = () => switchNode(node);
+          tabsDiv.appendChild(tab);
+        });
+      }
+
+      // 활성 탭 표시 갱신
+      tabsDiv.querySelectorAll('.node-tab-btn').forEach(tab => {
+        tab.classList.toggle('active',
+          currentNode === null
+            ? tab.dataset.devEui === '__all__'
+            : tab.dataset.devEui === currentNode.dev_eui
+        );
+      });
+    }
+
+    // 그래프 노드 선택 업데이트
+    function updateGraphNodeSelect(nodes) {
+      const select = document.getElementById('nodeGraphSelect');
+      const currentValue = select.value;  // 현재 선택된 값 저장
+      
+      // 옵션 목록에서 이미 있는 옵션과 새로운 옵션 비교
+      const existingOptions = new Set();
+      for (let opt of select.options) {
+        existingOptions.add(opt.value);
+      }
+      
+      const newDevices = new Set();
+      nodes.forEach(node => {
+        newDevices.add(node.dev_eui);
+      });
+      
+      // 새로운 노드만 추가 (기존 옵션은 건드리지 않음)
+      nodes.forEach(node => {
+        if (!existingOptions.has(node.dev_eui)) {
+          const option = document.createElement('option');
+          option.value = node.dev_eui;
+          option.textContent = node.dev_name || node.dev_eui.substring(0, 8);
+          select.appendChild(option);
+        }
+      });
+      
+      // 이전 선택값이 존재하면 복원
+      if (currentValue && Array.from(select.options).some(opt => opt.value === currentValue)) {
+        select.value = currentValue;
+      }
+    }
+
+    function switchNode(node) {
+      currentNode = node;
+
+      // 탭 활성화 상태 변경
+      document.querySelectorAll('.node-tab-btn').forEach(tab => {
+        if (node === null) {
+          tab.classList.toggle('active', tab.dataset.devEui === '__all__');
+        } else {
+          tab.classList.toggle('active', tab.dataset.devEui === node.dev_eui);
+        }
+      });
+
+      // 테이블 재갱신
+      refreshTable();
+    }
+
+    async function refreshDashboard() {
+      try {
+        const [eventsRes, summaryRes, nodesRes, collisionsRes] = await Promise.all([
+          fetch('/api/events'),
+          fetch('/api/summary'),
+          fetch('/api/nodes'),
+          fetch('/api/collisions')
+        ]);
+
+        const events = await eventsRes.json();
+        const summary = await summaryRes.json();
+        const nodes = await nodesRes.json();
+        const collisions = await collisionsRes.json();
+
+        console.log('[DEBUG] API 응답:', {
+          events: events.length,
+          summary: summary.total_events,
+          nodes: nodes.length,
+          collisions: collisions.total_collisions
+        });
+
+        allEvents = events;
+        lastSummary = summary;
+
+        // ===== 상단 통계 갱신 =====
+        document.getElementById('statEvents').textContent = summary.total_events;
+        document.getElementById('statDevices').textContent = summary.active_devices;
+        document.getElementById('statGateways').textContent = summary.active_gateways;
+        document.getElementById('statSNR').textContent = summary.avg_snr_all != null ? summary.avg_snr_all.toFixed(1) + ' dB' : '-';
+        document.getElementById('statRSSI').textContent = summary.avg_rssi_all != null ? summary.avg_rssi_all.toFixed(0) + ' dBm' : '-';
+        document.getElementById('statCollisions').textContent = collisions.total_collisions;
+
+        // 노드 탭 업데이트 (노드 없어도 항상 호출 — 전체 탭은 항상 표시)
+        updateNodeTabs(nodes);
+        updateGraphNodeSelect(nodes);
+
+        // ===== 그래프 갱신 =====
+        updateCharts();
+
+        // ===== 표 갱신 (현재 노드 필터, 최근 6개만) =====
+        refreshTable();
+        
+        // ===== 충돌 정보 갱신 =====
+        updateCollisionDetails(collisions);
+
+      } catch (e) {
+        console.error('[ERR] refreshDashboard error:', e);
+        console.error('[ERR] Stack:', e.stack);
+      }
+    }
+    
+    function updateCollisionDetails(collisionsData) {
+      const tbody = document.getElementById('collision-body');
+      const noData = document.getElementById('collisionNoData');
+      const table = document.getElementById('collisionTable');
+      
+      tbody.innerHTML = '';
+      
+      if (collisionsData.collisions.length === 0) {
+        noData.style.display = 'block';
+        table.style.display = 'none';
+        return;
+      }
+      
+      noData.style.display = 'none';
+      table.style.display = 'table';
+      
+      collisionsData.collisions.slice(0, 20).forEach(collision => {
+        const tr = document.createElement('tr');
+        tr.style.backgroundColor = '#ffe6e6';
+        
+        const addTd = (text) => {
+          const td = document.createElement('td');
+          td.textContent = text != null ? text : '-';
+          tr.appendChild(td);
+        };
+        
+        addTd(collision.time);
+        addTd(collision.dev_name);
+        addTd(collision.f_cnt);
+        addTd((collision.gateways || []).join(', '));
+        addTd((collision.reasons || []).join(', '));
+        addTd((collision.snr || []).map(s => s.toFixed(1)).join(', '));
+        
+        tbody.appendChild(tr);
+      });
+    }
+
+    function updateCharts() {
+      // 그래프용 데이터 필터링
+      let graphEvents = allEvents;
+      if (selectedGraphNode !== 'all') {
+        graphEvents = allEvents.filter(ev => ev.dev_eui === selectedGraphNode);
+      }
+
+      // SNR 바 차트
+      const snrData = {};
+      graphEvents.slice(-50).forEach(ev => {
+        const key = ev.time.split(' ')[1]; // 시간만 추출
+        if (!snrData[key]) snrData[key] = [];
+        const snrs = ev.snr || [];
+        if (snrs.length > 0) {
+          const avg = snrs.reduce((a,b) => a+b, 0) / snrs.length;
+          snrData[key].push(avg);
+        }
+      });
+
+      const snrLabels = Object.keys(snrData);
+      const snrValues = snrLabels.map(label => snrData[label][0] || 0);
+      
+      // SNR 최대값 동적 계산 (데이터의 최대값에 10% 여유)
+      const maxSnr = snrValues.length > 0 ? Math.max(...snrValues) : 10;
+      const snrYMax = Math.ceil(maxSnr * 1.1);
+      
+      const snrCtx = document.getElementById('snrChart');
+      if (snrCtx) {
+        snrChart = createOrUpdateChart(
+          snrChart,
+          snrCtx.getContext('2d'),
+          'bar',
+          {
+            labels: snrLabels,
+            datasets: [{
+              label: 'SNR',
+              data: snrValues,
+              backgroundColor: '#1e90ff',
+              borderColor: '#0066cc',
+              borderWidth: 1,
+            }]
+          },
+          {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            scales: {
+              y: { 
+                beginAtZero: true,
+                max: snrYMax,
+                title: { display: true, text: 'SNR (dB)' }
+              }
+            },
+            plugins: { legend: { display: false } }
+          }
+        );
+      }
+
+      // SF 분포 차트 — DB 전체 기준 (summary 사용)
+      const sfCtx = document.getElementById('sfChart');
+      if (sfCtx && lastSummary && lastSummary.sf_counts) {
+        const sfLabels = lastSummary.sf_counts.sfs.map(s => 'SF' + s);
+        const sfValues = lastSummary.sf_counts.counts;
+        sfChart = createOrUpdateChart(
+          sfChart,
+          sfCtx.getContext('2d'),
+          'doughnut',
+          {
+            labels: sfLabels,
+            datasets: [{
+              data: sfValues,
+              backgroundColor: ['#667eea', '#764ba2', '#f093fb', '#4facfe', '#00c9a7', '#ff6b6b'],
+              borderColor: '#fff',
+              borderWidth: 2,
+            }]
+          },
+          {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: { legend: { position: 'bottom' } }
+          }
+        );
+      }
+
+      // 충돌 감지 차트 - 실제 이벤트 데이터에서 충돌 감지 정보 추출
+      const collisionCtx = document.getElementById('collisionChart');
+      if (collisionCtx) {
+        const collisionData = snrLabels.map(label => {
+          // 해당 시간대의 이벤트 중 충돌 감지된 것이 있는지 확인
+          const eventsAtTime = graphEvents.filter(ev => ev.time.includes(label));
+          return eventsAtTime.some(ev => ev.collision_detected) ? 1 : 0;
+        });
+
+        collisionChart = createOrUpdateChart(
+          collisionChart,
+          collisionCtx.getContext('2d'),
+          'bar',
+          {
+            labels: snrLabels,
+            datasets: [{
+              label: '충돌 감지',
+              data: collisionData,
+              backgroundColor: collisionData.map(val => val === 1 ? '#ff6b6b' : '#c3fae8'),
+              borderColor: '#c92a2a',
+              borderWidth: 1,
+            }]
+          },
+          {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            scales: {
+              y: { 
+                max: 1,
+                ticks: { stepSize: 1 }
+              }
+            },
+            plugins: { legend: { display: false } }
+          }
+        );
+      }
+    }
+
+    function refreshTable() {
+      const isAll = currentNode === null;
+
+      let filteredEvents = allEvents;
+      if (!isAll) {
+        filteredEvents = allEvents.filter(ev => ev.dev_eui === currentNode.dev_eui);
+      }
+
+      // 헤더 타이틀 & 노드 컬럼 표시 토글
+      const total = filteredEvents.length;
+      document.getElementById('tableTitle').textContent = isAll
+        ? `최근 데이터 (전체 노드, ${total}건)`
+        : `최근 데이터 (${currentNode.dev_name || currentNode.dev_eui}, ${total}건)`;
+      document.getElementById('thNode').style.display = isAll ? '' : 'none';
+
+      const tbody = document.getElementById('events-body');
+      tbody.innerHTML = '';
+
+      filteredEvents.forEach((ev) => {
+        const tr = document.createElement('tr');
+        if (ev.collision_detected) tr.className = 'collision';
+
+        const addTd = (text, cls) => {
+          const td = document.createElement('td');
+          td.textContent = text != null ? text : '';
+          if (cls) td.className = cls;
+          tr.appendChild(td);
+        };
+
+        addTd(ev.time);
+
+        // 전체 탭일 때만 노드 이름 표시
+        if (isAll) {
+          const td = document.createElement('td');
+          td.style.fontWeight = '600';
+          td.textContent = ev.dev_name || ev.dev_eui || '-';
+          tr.appendChild(td);
+        }
+
+        addTd(ev.f_cnt);
+        addTd(ev.sf ? 'SF' + ev.sf : '-');
+        addTd(ev.frequency_mhz ? ev.frequency_mhz + ' MHz' : '-');
+        addTd((ev.rssi || []).join(', '));
+        addTd((ev.snr || []).map(v => Number(v).toFixed(1)).join(', '));
+
+        const statusTd = document.createElement('td');
+        statusTd.style.cssText = 'width:48px;min-width:48px;text-align:center;white-space:nowrap;';
+        const dot = document.createElement('span');
+        dot.style.cssText = 'display:inline-block;width:20px;height:20px;border-radius:50%;line-height:20px;font-size:12px;color:white;font-weight:700;text-align:center;';
+        if (ev.collision_detected) {
+          dot.style.background = '#ef4444';
+          dot.title = '충돌 감지';
+          dot.textContent = '!';
+        } else {
+          dot.style.background = '#22c55e';
+          dot.title = '정상';
+          dot.textContent = '✓';
+        }
+        statusTd.appendChild(dot);
+        tr.appendChild(statusTd);
+
+        // 정보 버튼
+        const infoBtnTd = document.createElement('td');
+        const nodeBtn = document.createElement('button');
+        nodeBtn.className = 'info-btn';
+        nodeBtn.textContent = '노드';
+        nodeBtn.onclick = () => showNodeModal(ev.dev_eui, ev.dev_name);
+        infoBtnTd.appendChild(nodeBtn);
+
+        const gws = ev.gateways || [];
+        if (gws.length > 0) {
+          const gwBtn = document.createElement('button');
+          gwBtn.className = 'info-btn';
+          gwBtn.style.marginLeft = '4px';
+          gwBtn.textContent = 'GW';
+          gwBtn.onclick = () => showGwModal(gws[0]);
+          infoBtnTd.appendChild(gwBtn);
+        }
+        tr.appendChild(infoBtnTd);
+
+        addTd(ev.payload_text || ev.payload_hex || '-', 'payload-cell');
+        tbody.appendChild(tr);
+      });
+    }
+
+    // 모달 외부 클릭 시 닫기
+    window.onclick = function(event) {
+      const nodeModal = document.getElementById('nodeModal');
+      const gwModal = document.getElementById('gwModal');
+      
+      if (event.target === nodeModal) closeNodeModal();
+      if (event.target === gwModal) closeGwModal();
+    }
+
+    // 그래프 노드 선택 이벤트 리스너 (초기화 시 한 번만 설정)
+    let selectChangeListener = (e) => {
+      selectedGraphNode = e.target.value;
+      updateCharts();
+    };
+    document.getElementById('nodeGraphSelect').addEventListener('change', selectChangeListener);
+
+    // 게이트웨이 카드 렌더링
+    function refreshGateways() {
+      fetch('/api/gateways')
+        .then(r => r.json())
+        .then(gws => {
+          const container = document.getElementById('gatewayCards');
+          if (!container) return;
+          container.innerHTML = '';
+          if (gws.length === 0) {
+            container.innerHTML = '<p style="color:#888;font-size:13px;">게이트웨이 없음</p>';
+            return;
+          }
+          gws.forEach(gw => {
+            const isOnline = gw.state === 'ONLINE';
+            const stateColor = isOnline ? '#22c55e' : gw.state === 'OFFLINE' ? '#ef4444' : '#94a3b8';
+            const card = document.createElement('div');
+            card.style.cssText = 'background:white;border-radius:8px;padding:14px 18px;min-width:220px;box-shadow:0 2px 6px rgba(0,0,0,0.08);cursor:pointer;border-left:4px solid ' + stateColor;
+            card.innerHTML = `
+              <div style="font-weight:700;font-size:14px;margin-bottom:6px;">📡 ${gw.name || gw.gateway_id}</div>
+              <div style="font-size:12px;color:#555;margin-bottom:4px;">ID: ${gw.gateway_id}</div>
+              <div style="font-size:12px;font-weight:600;color:${stateColor};">${gw.state || 'UNKNOWN'}</div>
+              <div style="font-size:11px;color:#888;margin-top:4px;">Last Seen: ${gw.last_seen_at || '-'}</div>
+              <div style="font-size:11px;color:#888;">메시지: ${gw.message_count} | RSSI: ${gw.avg_rssi !== null ? gw.avg_rssi + 'dBm' : '-'} | SNR: ${gw.avg_snr !== null ? gw.avg_snr + 'dB' : '-'}</div>
+              ${gw.location ? `<div style="font-size:11px;color:#667eea;margin-top:2px;">📍 ${gw.location.latitude.toFixed(4)}, ${gw.location.longitude.toFixed(4)} (${gw.location.source})</div>` : ''}
+            `;
+            card.onclick = () => showGwModal(gw.gateway_id);
+            container.appendChild(card);
+          });
+        })
+        .catch(e => console.error('[ERR] 게이트웨이 조회 실패:', e));
+    }
+
+    // 초기 로드
+    console.log('[*] 대시보드 초기 로드 시작...');
+    refreshDashboard().then(() => {
+      console.log('[OK] 대시보드 초기 로드 완료');
+    }).catch(e => {
+      console.error('[ERR] 초기 로드 실패:', e);
+    });
+    refreshGateways();
+
+    // 3초마다 갱신
+    console.log('[*] 3초 주기 갱신 활성화');
+    setInterval(refreshDashboard, 3000);
+    setInterval(refreshGateways, 30000);  // 30초마다 게이트웨이 갱신
+
+    // ===== 노드 등록 모달 =====
+    function generateHex(bytes) {
+      const arr = new Uint8Array(bytes);
+      crypto.getRandomValues(arr);
+      return Array.from(arr).map(b => b.toString(16).padStart(2,'0')).join('');
+    }
+
+    function regenerateCredentials() {
+      document.getElementById('regDevEui').value = generateHex(8);
+      document.getElementById('regAppKey').value = generateHex(16);
+    }
+
+    function openRegisterModal() {
+      document.getElementById('registerModal').style.display = 'flex';
+      document.getElementById('registerForm').style.display = 'block';
+      document.getElementById('registerResult').style.display = 'none';
+      document.getElementById('registerMsg').style.display = 'none';
+      document.getElementById('regName').value = '';
+      document.getElementById('regDesc').value = '';
+      regenerateCredentials();
+
+      fetch('/api/applications').then(r => r.json()).then(apps => {
+        document.getElementById('regApp').innerHTML =
+          apps.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
+      });
+      fetch('/api/device-profiles').then(r => r.json()).then(profiles => {
+        document.getElementById('regProfile').innerHTML =
+          profiles.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+      });
+    }
+
+    function closeRegisterModal() {
+      document.getElementById('registerModal').style.display = 'none';
+    }
+
+    function submitRegister() {
+      const devEui    = document.getElementById('regDevEui').value;
+      const appKey    = document.getElementById('regAppKey').value;
+      const name      = document.getElementById('regName').value.trim();
+      const desc      = document.getElementById('regDesc').value.trim();
+      const appId     = document.getElementById('regApp').value;
+      const profileId = document.getElementById('regProfile').value;
+      const msgEl     = document.getElementById('registerMsg');
+
+      if (!name) {
+        msgEl.style.cssText = 'display:block;padding:10px;border-radius:6px;margin-bottom:14px;font-size:13px;background:#fee2e2;color:#dc2626;';
+        msgEl.textContent = '이름을 입력하세요.';
+        return;
+      }
+
+      fetch('/api/register-node', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ dev_eui: devEui, name, description: desc, application_id: appId, device_profile_id: profileId, app_key: appKey })
+      })
+      .then(r => r.json())
+      .then(res => {
+        if (res.success) {
+          document.getElementById('registerForm').style.display = 'none';
+          document.getElementById('resultDevEui').textContent = devEui;
+          document.getElementById('resultAppKey').textContent = appKey;
+          document.getElementById('resultName').textContent   = name;
+          document.getElementById('registerResult').style.display = 'block';
+        } else {
+          msgEl.style.cssText = 'display:block;padding:10px;border-radius:6px;margin-bottom:14px;font-size:13px;background:#fee2e2;color:#dc2626;';
+          msgEl.textContent = '오류: ' + res.error;
+        }
+      });
+    }
+
+    function copyText(elId) {
+      const text = document.getElementById(elId).textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById(elId).nextElementSibling;
+        if (btn) { btn.textContent = '완료!'; setTimeout(() => btn.textContent = '복사', 1500); }
+      });
+    }
+
+    // 모달 외부 클릭 시 닫기
+    document.getElementById('registerModal').addEventListener('click', e => {
+      if (e.target === document.getElementById('registerModal')) closeRegisterModal();
+    });
+  </script>
+</body>
+</html>

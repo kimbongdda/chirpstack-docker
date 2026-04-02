@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>수신 기록 - LoRa Dashboard</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 15px; background: #f0f2f5; }
+
+    .header {
+      background: white; padding: 15px 20px; border-radius: 8px;
+      margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .header h1 { margin: 0; font-size: 20px; color: #1e293b; }
+
+    .section {
+      background: white; border-radius: 8px; padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 15px;
+    }
+    .section-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 16px; padding-bottom: 12px; border-bottom: 2px solid #667eea;
+    }
+    .section-header h2 { margin: 0; font-size: 16px; color: #1e293b; }
+
+    /* 필터 */
+    .filters {
+      display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 16px;
+    }
+    .filter-group { display: flex; flex-direction: column; gap: 4px; }
+    .filter-group label { font-size: 12px; font-weight: 600; color: #475569; }
+    .filter-group input, .filter-group select {
+      padding: 7px 10px; border: 1.5px solid #e2e8f0; border-radius: 6px;
+      font-size: 13px; color: #1e293b; background: white;
+    }
+    .btn { padding: 7px 16px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .btn-primary { background: linear-gradient(135deg,#667eea,#764ba2); color: white; }
+    .btn-reset   { background: #f1f5f9; color: #475569; border: 1.5px solid #cbd5e1; }
+    .btn-back    { background: #f1f5f9; color: #475569; border: 1.5px solid #cbd5e1;
+                   text-decoration: none; display: inline-flex; align-items: center;
+                   padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; }
+
+    /* 통계 바 */
+    .stats-bar {
+      display: flex; gap: 20px; flex-wrap: wrap;
+      background: #f8fafc; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;
+    }
+    .stat-item { display: flex; flex-direction: column; }
+    .stat-item .s-label { font-size: 11px; color: #94a3b8; font-weight: 600; }
+    .stat-item .s-value { font-size: 18px; font-weight: 700; color: #1e293b; }
+
+    /* 테이블 */
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead tr { background: #f8fafc; border-bottom: 2px solid #e2e8f0; }
+    th { padding: 10px 12px; text-align: left; font-weight: 600; color: #475569; white-space: nowrap; }
+    td { padding: 9px 12px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+    tbody tr:hover { background: #f8fafc; }
+    tr.collision { background: #fff1f2; }
+    tr.collision:hover { background: #ffe4e6; }
+
+    .badge-collision { background: #fee2e2; color: #dc2626; font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 4px; }
+    .badge-ok        { background: #dcfce7; color: #16a34a; font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 4px; }
+
+    /* 페이지네이션 */
+    .pagination {
+      display: flex; justify-content: center; align-items: center;
+      gap: 6px; margin-top: 16px; flex-wrap: wrap;
+    }
+    .page-btn {
+      padding: 5px 11px; border: 1.5px solid #e2e8f0; border-radius: 6px;
+      font-size: 13px; cursor: pointer; background: white; color: #475569;
+    }
+    .page-btn.active { background: #667eea; color: white; border-color: #667eea; font-weight: 700; }
+    .page-btn:disabled { opacity: 0.4; cursor: default; }
+    .page-info { font-size: 13px; color: #94a3b8; }
+
+    /* 날짜별 통계 차트 */
+    .chart-wrap { height: 160px; position: relative; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>수신 기록</h1>
+    <div style="display:flex;gap:10px;">
+      <a href="/" class="btn-back">← 대시보드</a>
+      <a href="/nodes" class="btn-back">노드 관리</a>
+    </div>
+  </div>
+
+  <!-- 날짜별 통계 -->
+  <div class="section">
+    <div class="section-header">
+      <h2>날짜별 수신 건수 (최근 30일)</h2>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="dailyChart"></canvas>
+    </div>
+  </div>
+
+  <!-- 필터 + 테이블 -->
+  <div class="section">
+    <div class="section-header">
+      <h2>이벤트 목록</h2>
+      <span id="totalInfo" style="font-size:13px;color:#94a3b8;"></span>
+    </div>
+
+    <div class="filters">
+      <div class="filter-group">
+        <label>날짜</label>
+        <input type="date" id="filterDate" />
+      </div>
+      <div class="filter-group">
+        <label>디바이스</label>
+        <select id="filterDevice" style="min-width:160px;">
+          <option value="">전체</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>페이지당</label>
+        <select id="filterPerPage">
+          <option value="50">50건</option>
+          <option value="100">100건</option>
+          <option value="200">200건</option>
+        </select>
+      </div>
+      <div class="filter-group" style="justify-content:flex-end;">
+        <label>&nbsp;</label>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-primary" onclick="applyFilter()">검색</button>
+          <button class="btn btn-reset" onclick="resetFilter()">초기화</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="stats-bar">
+      <div class="stat-item"><span class="s-label">총 건수</span><span class="s-value" id="sTotal">-</span></div>
+      <div class="stat-item"><span class="s-label">충돌 감지</span><span class="s-value" id="sCollision" style="color:#dc2626;">-</span></div>
+      <div class="stat-item"><span class="s-label">디바이스 수</span><span class="s-value" id="sDevices">-</span></div>
+    </div>
+
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>시간</th>
+            <th>디바이스</th>
+            <th>DevAddr</th>
+            <th>FCnt</th>
+            <th>주파수</th>
+            <th>SF</th>
+            <th>RSSI</th>
+            <th>SNR</th>
+            <th>게이트웨이</th>
+            <th>페이로드 (HEX)</th>
+            <th>텍스트</th>
+            <th>충돌</th>
+          </tr>
+        </thead>
+        <tbody id="historyBody">
+          <tr><td colspan="12" style="padding:30px;text-align:center;color:#94a3b8;">불러오는 중...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="pagination" id="pagination"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    let currentPage = 1;
+    let dailyChart = null;
+
+    // ===== 디바이스 목록 로드 =====
+    fetch('/api/history/devices')
+      .then(r => r.json())
+      .then(devices => {
+        const sel = document.getElementById('filterDevice');
+        devices.forEach(d => {
+          const opt = document.createElement('option');
+          opt.value = d.dev_eui;
+          opt.textContent = `${d.dev_name || d.dev_eui} (${d.dev_eui})`;
+          sel.appendChild(opt);
+        });
+      });
+
+    // ===== 날짜별 통계 차트 =====
+    fetch('/api/history/stats')
+      .then(r => r.json())
+      .then(stats => {
+        const sorted = stats.slice().reverse();
+        const labels = sorted.map(s => s.date);
+        const counts = sorted.map(s => s.count);
+
+        const ctx = document.getElementById('dailyChart').getContext('2d');
+        dailyChart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels,
+            datasets: [{
+              label: '수신 건수',
+              data: counts,
+              backgroundColor: 'rgba(102,126,234,0.7)',
+              borderRadius: 4,
+            }]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { ticks: { font: { size: 11 } } },
+              y: { ticks: { font: { size: 11 } }, beginAtZero: true },
+            },
+            onClick: (e, els) => {
+              if (!els.length) return;
+              const date = labels[els[0].index];
+              document.getElementById('filterDate').value = date;
+              currentPage = 1;
+              loadHistory();
+            }
+          }
+        });
+      });
+
+    // ===== 히스토리 로드 =====
+    function loadHistory() {
+      const date     = document.getElementById('filterDate').value;
+      const devEui   = document.getElementById('filterDevice').value;
+      const perPage  = document.getElementById('filterPerPage').value;
+      const tbody    = document.getElementById('historyBody');
+
+      tbody.innerHTML = '<tr><td colspan="12" style="padding:30px;text-align:center;color:#94a3b8;">불러오는 중...</td></tr>';
+
+      const params = new URLSearchParams({ page: currentPage, per_page: perPage });
+      if (date)   params.append('date', date);
+      if (devEui) params.append('dev_eui', devEui);
+
+      fetch(`/api/history?${params}`)
+        .then(r => r.json())
+        .then(data => {
+          document.getElementById('totalInfo').textContent = `총 ${data.total.toLocaleString()}건`;
+          document.getElementById('sTotal').textContent = data.total.toLocaleString();
+
+          const collisionCount = data.events.filter(e => e.collision_detected).length;
+          document.getElementById('sCollision').textContent = collisionCount;
+
+          const devSet = new Set(data.events.map(e => e.dev_eui).filter(Boolean));
+          document.getElementById('sDevices').textContent = devSet.size;
+
+          if (!data.events.length) {
+            tbody.innerHTML = '<tr><td colspan="12" style="padding:30px;text-align:center;color:#94a3b8;">기록 없음</td></tr>';
+            document.getElementById('pagination').innerHTML = '';
+            return;
+          }
+
+          tbody.innerHTML = '';
+          data.events.forEach(ev => {
+            const tr = document.createElement('tr');
+            if (ev.collision_detected) tr.className = 'collision';
+
+            const rssi = (ev.rssi || []).join(', ') || '-';
+            const snr  = (ev.snr  || []).map(v => Number(v).toFixed(1)).join(', ') || '-';
+            const gws  = (ev.gateways || []).length;
+            const reasons = (ev.collision_reasons || []).join(', ');
+
+            tr.innerHTML = `
+              <td style="white-space:nowrap;font-size:12px;">${ev.time}</td>
+              <td style="font-weight:600;">${ev.dev_name || '-'}<br><span style="font-family:monospace;font-size:11px;color:#94a3b8;">${ev.dev_eui || ''}</span></td>
+              <td style="font-family:monospace;font-size:12px;">${ev.dev_addr || '-'}</td>
+              <td style="text-align:center;">${ev.f_cnt ?? '-'}</td>
+              <td style="text-align:center;">${ev.frequency_mhz ? ev.frequency_mhz + ' MHz' : '-'}</td>
+              <td style="text-align:center;">${ev.sf ? 'SF' + ev.sf : '-'}</td>
+              <td style="text-align:center;">${rssi} dBm</td>
+              <td style="text-align:center;">${snr} dB</td>
+              <td style="text-align:center;">${gws}개</td>
+              <td style="font-family:monospace;font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${ev.payload_hex || ''}">${ev.payload_hex || '-'}</td>
+              <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;" title="${ev.payload_text || ''}">${ev.payload_text || '-'}</td>
+              <td>${ev.collision_detected
+                ? `<span class="badge-collision" title="${reasons}">충돌</span>`
+                : '<span class="badge-ok">정상</span>'}</td>
+            `;
+            tbody.appendChild(tr);
+          });
+
+          renderPagination(data.page, data.pages);
+        });
+    }
+
+    function renderPagination(current, total) {
+      const el = document.getElementById('pagination');
+      if (total <= 1) { el.innerHTML = ''; return; }
+
+      let html = `<button class="page-btn" onclick="goPage(${current-1})" ${current===1?'disabled':''}>‹ 이전</button>`;
+
+      const range = [];
+      for (let i = Math.max(1, current-2); i <= Math.min(total, current+2); i++) range.push(i);
+      if (range[0] > 1) html += `<button class="page-btn" onclick="goPage(1)">1</button>${range[0]>2?'<span class="page-info">…</span>':''}`;
+      range.forEach(p => {
+        html += `<button class="page-btn ${p===current?'active':''}" onclick="goPage(${p})">${p}</button>`;
+      });
+      if (range[range.length-1] < total) html += `${range[range.length-1]<total-1?'<span class="page-info">…</span>':''}<button class="page-btn" onclick="goPage(${total})">${total}</button>`;
+
+      html += `<button class="page-btn" onclick="goPage(${current+1})" ${current===total?'disabled':''}>다음 ›</button>`;
+      html += `<span class="page-info">${current} / ${total} 페이지</span>`;
+      el.innerHTML = html;
+    }
+
+    function goPage(p) { currentPage = p; loadHistory(); window.scrollTo(0,0); }
+    function applyFilter() { currentPage = 1; loadHistory(); }
+    function resetFilter() {
+      document.getElementById('filterDate').value = '';
+      document.getElementById('filterDevice').value = '';
+      currentPage = 1;
+      loadHistory();
+    }
+
+    // 초기 로드
+    loadHistory();
+  </script>
+</body>
+</html>

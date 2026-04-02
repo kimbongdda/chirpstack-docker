@@ -1,0 +1,20 @@
+# 기존 docker-compose.yml에 아래 서비스를 추가하세요.
+# services: 블록 안에 붙여넣으면 됩니다.
+
+  lora-dashboard:
+    build: ./lora-dashboard        # 이 프로젝트 폴더 경로로 수정
+    # image: lora-dashboard:latest # 빌드 대신 이미지 사용 시
+    container_name: lora-dashboard
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./lora-dashboard/.env      # .env 파일 경로로 수정
+    environment:
+      - MQTT_BROKER=mosquitto
+      - CHIRPSTACK_HOST=chirpstack
+    depends_on:
+      - mosquitto
+      - chirpstack
+    networks:
+      - chirpstack                  # 기존 ChirpStack 네트워크 이름으로 수정
