@@ -6,6 +6,52 @@ open-source LoRaWAN Network Server (v4) using [Docker Compose](https://docs.dock
 **Note:** Please use this `docker-compose.yml` file as a starting point for testing
 but keep in mind that for production usage it might need modifications. 
 
+## Korean Guide
+
+이 저장소는 Docker Compose 기반으로 ChirpStack v4, MQTT broker, PostgreSQL, Redis,
+REST API, 그리고 커스텀 대시보드를 함께 실행하기 위한 예제 프로젝트입니다.
+
+### What Is Included
+
+* `docker-compose.yml`: 전체 서비스 실행 구성
+* `configuration/chirpstack`: ChirpStack 설정 파일
+* `configuration/chirpstack-gateway-bridge`: Gateway Bridge 설정 파일
+* `configuration/mosquitto`: MQTT broker 설정 파일
+* `dashboard`: Flask 기반 LoRa 대시보드 코드
+
+### Quick Start On A New Laptop
+
+1. 저장소를 clone 합니다.
+2. `dashboard/.env.example` 파일을 복사해서 `dashboard/.env` 파일을 만듭니다.
+3. `dashboard/.env` 안의 MQTT 주소, ChirpStack 주소, API 토큰을 환경에 맞게 수정합니다.
+4. 아래 명령으로 컨테이너를 실행합니다.
+
+```bash
+docker compose up --build -d
+```
+
+실행 후 기본 접속 주소는 아래와 같습니다.
+
+* ChirpStack UI: `http://localhost:8080`
+* ChirpStack REST API: `http://localhost:8090`
+* Dashboard: `http://localhost:5000`
+
+### Notes For Git Sharing
+
+이 저장소는 "개인정보 없는 버전" 기준으로 정리되어 있습니다.
+
+* `dashboard/.env` 는 Git에 포함되지 않습니다.
+* Docker named volume 데이터도 Git에 포함되지 않습니다.
+* 따라서 다른 PC에서 실행할 때는 `.env` 를 새로 만들고, 데이터는 별도 백업이 필요합니다.
+
+### Region Configuration
+
+지역 설정을 바꿀 때는 아래 항목을 같이 확인해야 합니다.
+
+* `configuration/chirpstack/chirpstack.toml` 의 `enabled_regions`
+* `docker-compose.yml` 의 `INTEGRATION__MQTT__..._TOPIC_TEMPLATE`
+* `chirpstack-gateway-bridge-basicstation-*.toml` 중 사용할 지역 파일
+
 ## Directory layout
 
 * `docker-compose.yml`: the docker-compose file containing the services
