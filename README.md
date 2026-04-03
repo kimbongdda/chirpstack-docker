@@ -21,6 +21,13 @@ testing, but keep in mind that production usage may require additional changes.
 * `configuration/postgresql/initdb`: PostgreSQL initialization scripts
 * `dashboard`: Flask-based LoRa dashboard code
 
+## Packaging Workflows
+
+If you want ready-made packaging and migration scripts, see:
+
+* [docs/package-workflows.md](docs/package-workflows.md)
+* [docs/package-workflows.ko.md](docs/package-workflows.ko.md)
+
 ## Configuration
 
 This setup is pre-configured for all regions. You can either connect a

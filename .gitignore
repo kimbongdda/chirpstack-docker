@@ -10,10 +10,15 @@
 !.github/
 
 # Ignore local runtime data and backup artifacts.
+/artifacts/
 /data/
 /lorawan-devices/
 *.db
 *.sqlite
 *.sqlite3
+*.sql
+*.dump
+*.sql.gz
+*.rdb
 *.bak
 *.log

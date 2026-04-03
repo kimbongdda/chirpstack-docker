@@ -21,6 +21,13 @@
 * `configuration/postgresql/initdb`: PostgreSQL 초기화 스크립트
 * `dashboard`: Flask 기반 LoRa 대시보드 코드
 
+## 패키징/이전 워크플로
+
+공개용 export, 개인용 migration backup/restore 가이드는 아래 문서를 보면 됩니다.
+
+* [docs/package-workflows.ko.md](docs/package-workflows.ko.md)
+* [docs/package-workflows.md](docs/package-workflows.md)
+
 ## 새 노트북에서 실행하기
 
 1. 저장소를 clone 합니다.

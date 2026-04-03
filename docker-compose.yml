@@ -1,3 +1,5 @@
+name: chirpstack-docker
+
 services:
   chirpstack:
     image: chirpstack/chirpstack:4
