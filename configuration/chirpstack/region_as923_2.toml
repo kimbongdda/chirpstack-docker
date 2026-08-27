@@ -202,3 +202,41 @@
       # set this to 0 to use the default frequency plan for the configured region
       # (which could be frequency hopping).
       ping_slot_frequency=0
+
+
+    # Gateway is currently transmitting on these additional channels.
+    # Accept them in the AS923_2 region to prevent "No channel found" drops.
+    [[regions.network.extra_channels]]
+    frequency=922100000
+    min_dr=0
+    max_dr=5
+
+    [[regions.network.extra_channels]]
+    frequency=922300000
+    min_dr=0
+    max_dr=5
+
+    [[regions.network.extra_channels]]
+    frequency=922500000
+    min_dr=0
+    max_dr=5
+
+    [[regions.network.extra_channels]]
+    frequency=922700000
+    min_dr=0
+    max_dr=5
+
+    [[regions.network.extra_channels]]
+    frequency=922900000
+    min_dr=0
+    max_dr=5
+
+    [[regions.network.extra_channels]]
+    frequency=923100000
+    min_dr=0
+    max_dr=5
+
+    [[regions.network.extra_channels]]
+    frequency=923300000
+    min_dr=0
+    max_dr=5

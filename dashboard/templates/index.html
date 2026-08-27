@@ -477,8 +477,8 @@
     
     .data-content {
       padding: 0;
-      max-height: 380px;
-      overflow-y: auto;
+      max-height: none;
+      overflow: visible;
     }
     .events-table thead th {
       position: sticky;
@@ -752,6 +752,7 @@
     let allNodes = [];
     let selectedGraphNode = 'all';
     let allEvents = [];
+    let latestEventId = 0;
     let lastSummary = null;
 
     function createOrUpdateChart(chartRef, ctx, type, data, options) {
@@ -1078,22 +1079,33 @@
         tabsDiv.appendChild(allTab);
 
         nodes.forEach(node => {
+          const wrap = document.createElement('span');
+          wrap.style.cssText = 'display:inline-flex;align-items:center;gap:2px;';
+
           const tab = document.createElement('button');
           tab.className = 'node-tab-btn';
           tab.dataset.devEui = node.dev_eui;
           tab.textContent = node.dev_name || node.dev_eui.substring(0, 8);
           tab.onclick = () => switchNode(node);
-          tabsDiv.appendChild(tab);
+
+          const delBtn = document.createElement('button');
+          delBtn.title = '패킷 전체 삭제';
+          delBtn.textContent = '✕';
+          delBtn.style.cssText = 'padding:2px 5px;font-size:10px;font-weight:700;background:#f97316;color:white;border:none;border-radius:3px;cursor:pointer;line-height:1.4;';
+          delBtn.onclick = (e) => { e.stopPropagation(); clearNodeEvents(node.dev_eui, node.dev_name); };
+
+          wrap.appendChild(tab);
+          wrap.appendChild(delBtn);
+          tabsDiv.appendChild(wrap);
         });
       }
 
       // 활성 탭 표시 갱신
       tabsDiv.querySelectorAll('.node-tab-btn').forEach(tab => {
-        tab.classList.toggle('active',
-          currentNode === null
-            ? tab.dataset.devEui === '__all__'
-            : tab.dataset.devEui === currentNode.dev_eui
-        );
+        const isActive = currentNode === null
+          ? tab.dataset.devEui === '__all__'
+          : tab.dataset.devEui === currentNode.dev_eui;
+        tab.classList.toggle('active', isActive);
       });
     }
 
@@ -1145,6 +1157,24 @@
       refreshTable();
     }
 
+    function clearNodeEvents(devEui, name) {
+      if (!confirm(`"${name}" 의 수신 패킷을 모두 삭제하시겠습니까?\nFCnt 카운터는 유지됩니다.`)) return;
+      fetch(`/api/clear-node-events/${devEui}`, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(res => {
+          if (res.success) {
+            allEvents = allEvents.filter(ev => ev.dev_eui !== devEui);
+            refreshTable();
+            if (lastSummary) {
+              // 카운트를 정확히 모르므로 다음 갱신 때 반영되도록 캐시만 클리어
+              lastSummary = null;
+            }
+          } else {
+            alert('삭제 실패: ' + res.error);
+          }
+        });
+    }
+
     async function refreshDashboard() {
       try {
         const [eventsRes, summaryRes, nodesRes, collisionsRes] = await Promise.all([
@@ -1154,10 +1184,11 @@
           fetch('/api/collisions')
         ]);
 
-        const events = await eventsRes.json();
+        const eventsPayload = await eventsRes.json();
         const summary = await summaryRes.json();
         const nodes = await nodesRes.json();
         const collisions = await collisionsRes.json();
+        const events = Array.isArray(eventsPayload) ? eventsPayload : (eventsPayload.events || []);
 
         console.log('[DEBUG] API 응답:', {
           events: events.length,
@@ -1166,7 +1197,8 @@
           collisions: collisions.total_collisions
         });
 
-        allEvents = events;
+  allEvents = events.slice(0, 20);
+  latestEventId = allEvents.length ? Math.max(...allEvents.map(ev => ev.id || 0)) : 0;
         lastSummary = summary;
 
         // ===== 상단 통계 갱신 =====
@@ -1193,6 +1225,57 @@
       } catch (e) {
         console.error('[ERR] refreshDashboard error:', e);
         console.error('[ERR] Stack:', e.stack);
+      }
+    }
+
+    async function pollRecentEvents() {
+      try {
+        const res = await fetch(`/api/events?since_id=${latestEventId}&limit=20`);
+        const payload = await res.json();
+        const newEvents = Array.isArray(payload) ? payload : (payload.events || []);
+        if (!newEvents.length) return;
+
+        const reversed = [...newEvents].reverse();
+        allEvents = reversed.concat(allEvents).slice(0, 20);
+        latestEventId = Math.max(latestEventId, ...newEvents.map(ev => ev.id || 0));
+
+        if (lastSummary && typeof lastSummary.total_events === 'number') {
+          lastSummary.total_events += newEvents.length;
+          document.getElementById('statEvents').textContent = lastSummary.total_events;
+        }
+
+        refreshTable();
+        updateCharts();
+      } catch (e) {
+        console.error('[ERR] pollRecentEvents error:', e);
+      }
+    }
+
+    async function refreshStaticData() {
+      try {
+        const [summaryRes, nodesRes, collisionsRes] = await Promise.all([
+          fetch('/api/summary'),
+          fetch('/api/nodes'),
+          fetch('/api/collisions')
+        ]);
+
+        const summary = await summaryRes.json();
+        const nodes = await nodesRes.json();
+        const collisions = await collisionsRes.json();
+
+        lastSummary = summary;
+        document.getElementById('statEvents').textContent = summary.total_events;
+        document.getElementById('statDevices').textContent = summary.active_devices;
+        document.getElementById('statGateways').textContent = summary.active_gateways;
+        document.getElementById('statSNR').textContent = summary.avg_snr_all != null ? summary.avg_snr_all.toFixed(1) + ' dB' : '-';
+        document.getElementById('statRSSI').textContent = summary.avg_rssi_all != null ? summary.avg_rssi_all.toFixed(0) + ' dBm' : '-';
+        document.getElementById('statCollisions').textContent = collisions.total_collisions;
+
+        updateNodeTabs(nodes);
+        updateGraphNodeSelect(nodes);
+        updateCollisionDetails(collisions);
+      } catch (e) {
+        console.error('[ERR] refreshStaticData error:', e);
       }
     }
     
@@ -1224,7 +1307,7 @@
         
         addTd(collision.time);
         addTd(collision.dev_name);
-        addTd(collision.f_cnt);
+        addTd(collision.display_f_cnt ?? collision.f_cnt);
         addTd((collision.gateways || []).join(', '));
         addTd((collision.reasons || []).join(', '));
         addTd((collision.snr || []).map(s => s.toFixed(1)).join(', '));
@@ -1396,7 +1479,7 @@
           tr.appendChild(td);
         }
 
-        addTd(ev.f_cnt);
+        addTd(ev.display_f_cnt ?? ev.f_cnt);
         addTd(ev.sf ? 'SF' + ev.sf : '-');
         addTd(ev.frequency_mhz ? ev.frequency_mhz + ' MHz' : '-');
         addTd((ev.rssi || []).join(', '));
@@ -1437,7 +1520,18 @@
         }
         tr.appendChild(infoBtnTd);
 
-        addTd(ev.payload_text || ev.payload_hex || '-', 'payload-cell');
+        // decoded_object 우선, 없으면 payload_text, 없으면 hex
+        let payloadDisplay = '-';
+        if (ev.decoded_object && typeof ev.decoded_object === 'object') {
+          payloadDisplay = Object.entries(ev.decoded_object)
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(' | ');
+        } else if (ev.payload_text) {
+          payloadDisplay = ev.payload_text;
+        } else if (ev.payload_hex) {
+          payloadDisplay = ev.payload_hex;
+        }
+        addTd(payloadDisplay, 'payload-cell');
         tbody.appendChild(tr);
       });
     }
@@ -1500,9 +1594,16 @@
     refreshGateways();
 
     // 3초마다 갱신
-    console.log('[*] 3초 주기 갱신 활성화');
-    setInterval(refreshDashboard, 3000);
-    setInterval(refreshGateways, 30000);  // 30초마다 게이트웨이 갱신
+    console.log('[*] 실시간 증분 갱신 활성화');
+    setInterval(() => {
+      if (!document.hidden) pollRecentEvents();
+    }, 2000);
+    setInterval(() => {
+      if (!document.hidden) {
+        refreshStaticData();
+        refreshGateways();
+      }
+    }, 60000);  // 60초마다 요약/노드/게이트웨이 갱신
 
     // ===== 노드 등록 모달 =====
     function generateHex(bytes) {

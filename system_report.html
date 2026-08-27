@@ -1,0 +1,1455 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LoRaWAN 데이터 수집 시스템 구현 보고서</title>
+<style>
+:root {
+  --navy:       #1C3553;
+  --navy-mid:   #2A4E73;
+  --teal:       #0C7A69;
+  --teal-light: #E6F4F1;
+  --amber:      #B45309;
+  --amber-bg:   #FEF3C7;
+  --bg:         #F4F6F9;
+  --bg-card:    #FFFFFF;
+  --border:     #D1D9E4;
+  --txt:        #1A2535;
+  --txt-2:      #3D5066;
+  --txt-3:      #6B7E96;
+  --sidebar-w:  220px;
+
+  /* Protocol badge colors */
+  --lora:    #DC2626;
+  --lora-bg: #FEF2F2;
+  --udp:     #D97706;
+  --udp-bg:  #FFFBEB;
+  --mqtt:    #059669;
+  --mqtt-bg: #ECFDF5;
+  --grpc:    #7C3AED;
+  --grpc-bg: #F5F3FF;
+  --http:    #2563EB;
+  --http-bg: #EFF6FF;
+  --ws:      #0891B2;
+  --ws-bg:   #ECFEFF;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:       #0D1117;
+    --bg-card:  #161B22;
+    --border:   #30363D;
+    --txt:      #E6EDF3;
+    --txt-2:    #8B949E;
+    --txt-3:    #6E7681;
+    --teal-light: #0D2E28;
+    --amber-bg: #2D1F00;
+    --lora-bg:  #2D0000;
+    --udp-bg:   #2D1A00;
+    --mqtt-bg:  #002D1A;
+    --grpc-bg:  #1A0D33;
+    --http-bg:  #001233;
+    --ws-bg:    #002933;
+  }
+}
+:root[data-theme="light"] {
+  --bg:       #F4F6F9; --bg-card: #FFFFFF; --border: #D1D9E4;
+  --txt:      #1A2535; --txt-2:   #3D5066; --txt-3:  #6B7E96;
+  --teal-light: #E6F4F1; --amber-bg: #FEF3C7;
+  --lora-bg: #FEF2F2; --udp-bg: #FFFBEB; --mqtt-bg: #ECFDF5;
+  --grpc-bg: #F5F3FF; --http-bg: #EFF6FF; --ws-bg: #ECFEFF;
+}
+:root[data-theme="dark"] {
+  --bg:       #0D1117; --bg-card: #161B22; --border: #30363D;
+  --txt:      #E6EDF3; --txt-2:   #8B949E; --txt-3:  #6E7681;
+  --teal-light: #0D2E28; --amber-bg: #2D1F00;
+  --lora-bg: #2D0000; --udp-bg: #2D1A00; --mqtt-bg: #002D1A;
+  --grpc-bg: #1A0D33; --http-bg: #001233; --ws-bg: #002933;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.7;
+  background: var(--bg);
+  color: var(--txt);
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ── Sidebar ─────────────────────────────── */
+.sidebar {
+  width: var(--sidebar-w);
+  min-width: var(--sidebar-w);
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  background: var(--navy);
+  overflow-y: auto;
+  padding: 28px 0 40px;
+  z-index: 100;
+}
+.sidebar-brand {
+  padding: 0 20px 24px;
+  border-bottom: 1px solid rgba(255,255,255,.1);
+  margin-bottom: 16px;
+}
+.sidebar-brand .logo {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: rgba(255,255,255,.5);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.sidebar-brand h1 {
+  font-family: Georgia, serif;
+  font-size: 14px;
+  font-weight: normal;
+  color: #fff;
+  line-height: 1.4;
+}
+.toc-section {
+  padding: 0 20px;
+  margin-bottom: 6px;
+}
+.toc-section-label {
+  font-size: 9px;
+  letter-spacing: 1.8px;
+  color: rgba(255,255,255,.35);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  margin-top: 14px;
+}
+.toc-link {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  color: rgba(255,255,255,.65);
+  text-decoration: none;
+  font-size: 12px;
+  transition: background .15s, color .15s;
+}
+.toc-link:hover { background: rgba(255,255,255,.1); color: #fff; }
+.toc-link.active { background: rgba(255,255,255,.12); color: #fff; }
+.toc-num {
+  font-size: 10px;
+  color: rgba(255,255,255,.3);
+  font-variant-numeric: tabular-nums;
+  min-width: 18px;
+}
+
+/* ── Main ────────────────────────────────── */
+.main {
+  margin-left: var(--sidebar-w);
+  flex: 1;
+  max-width: calc(100% - var(--sidebar-w));
+  padding: 0 48px 80px;
+}
+
+/* ── Report header ───────────────────────── */
+.report-header {
+  border-bottom: 3px solid var(--navy);
+  padding: 40px 0 28px;
+  margin-bottom: 40px;
+}
+.report-header .eyebrow {
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--teal);
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.report-header h1 {
+  font-family: Georgia, serif;
+  font-size: 28px;
+  font-weight: normal;
+  color: var(--navy);
+  line-height: 1.3;
+  margin-bottom: 16px;
+}
+:root[data-theme="dark"] .report-header h1 { color: #E6EDF3; }
+@media (prefers-color-scheme: dark) { .report-header h1 { color: #E6EDF3; } }
+.report-meta {
+  display: flex;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+.meta-item { font-size: 12px; color: var(--txt-3); }
+.meta-item strong { color: var(--txt-2); margin-right: 4px; }
+
+/* ── Sections ────────────────────────────── */
+section {
+  margin-bottom: 56px;
+  scroll-margin-top: 24px;
+}
+section h2 {
+  font-family: Georgia, serif;
+  font-size: 20px;
+  font-weight: normal;
+  color: var(--navy);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+:root[data-theme="dark"] section h2 { color: #A8C3E8; }
+@media (prefers-color-scheme: dark) { section h2 { color: #A8C3E8; } }
+.sec-num {
+  font-family: Georgia, serif;
+  font-size: 13px;
+  color: var(--teal);
+  letter-spacing: .5px;
+}
+section h3 {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .4px;
+  color: var(--txt);
+  margin: 24px 0 10px;
+  text-transform: uppercase;
+}
+
+/* ── Callouts ────────────────────────────── */
+.callout {
+  border-left: 3px solid var(--teal);
+  background: var(--teal-light);
+  padding: 12px 16px;
+  border-radius: 0 6px 6px 0;
+  font-size: 13px;
+  margin: 16px 0;
+  color: var(--txt-2);
+}
+.callout.warn {
+  border-color: var(--amber);
+  background: var(--amber-bg);
+}
+
+/* ── Tables ──────────────────────────────── */
+.tw { overflow-x: auto; margin: 12px 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+th {
+  background: var(--navy);
+  color: rgba(255,255,255,.9);
+  font-size: 11px;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 600;
+}
+td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--txt-2);
+  vertical-align: top;
+}
+tr:nth-child(even) td { background: var(--bg); }
+tr:hover td { background: var(--teal-light); }
+td:first-child { font-weight: 600; color: var(--txt); }
+
+/* ── Protocol badges ─────────────────────── */
+.badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.b-lora { background: var(--lora-bg); color: var(--lora); border: 1px solid var(--lora); }
+.b-udp  { background: var(--udp-bg);  color: var(--udp);  border: 1px solid var(--udp); }
+.b-mqtt { background: var(--mqtt-bg); color: var(--mqtt); border: 1px solid var(--mqtt); }
+.b-grpc { background: var(--grpc-bg); color: var(--grpc); border: 1px solid var(--grpc); }
+.b-http { background: var(--http-bg); color: var(--http); border: 1px solid var(--http); }
+.b-ws   { background: var(--ws-bg);   color: var(--ws);   border: 1px solid var(--ws); }
+.b-enc  { background: #F0F0F0; color: #444; border: 1px solid #ccc; }
+:root[data-theme="dark"] .b-enc, .b-enc-d { background: #2A2A2A; color: #aaa; border-color: #444; }
+
+/* ── Code blocks ─────────────────────────── */
+pre {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--navy-mid);
+  border-radius: 0 6px 6px 0;
+  padding: 14px 18px;
+  font-family: 'Consolas', 'Cascadia Code', monospace;
+  font-size: 12px;
+  overflow-x: auto;
+  color: var(--txt-2);
+  line-height: 1.6;
+  margin: 10px 0;
+}
+code {
+  font-family: 'Consolas', 'Cascadia Code', monospace;
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  color: var(--teal);
+}
+.cm { color: var(--txt-3); } /* comment */
+
+/* ── Pipeline SVG diagram ─────────────────── */
+.diag { overflow-x: auto; margin: 20px 0; }
+.diag svg text { font-family: 'Segoe UI', system-ui, sans-serif; fill: var(--txt); }
+
+/* ── Stats grid ──────────────────────────── */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.stat-card .label {
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--txt-3);
+  margin-bottom: 4px;
+}
+.stat-card .value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--navy);
+  font-variant-numeric: tabular-nums;
+}
+:root[data-theme="dark"] .stat-card .value { color: #A8C3E8; }
+@media (prefers-color-scheme: dark) { .stat-card .value { color: #A8C3E8; } }
+.stat-card .sub {
+  font-size: 11px;
+  color: var(--txt-3);
+  margin-top: 2px;
+}
+
+/* ── Legend strip ────────────────────────── */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0;
+  font-size: 12px;
+  align-items: center;
+}
+.legend-label { color: var(--txt-3); font-size: 11px; margin-right: 4px; }
+
+/* ── API endpoint list ───────────────────── */
+.endpoint-list { list-style: none; margin: 8px 0; }
+.endpoint-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.endpoint-list li:hover { background: var(--teal-light); }
+.method {
+  display: inline-block;
+  min-width: 44px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .4px;
+  text-align: center;
+}
+.m-get  { background: #DBEAFE; color: #1D4ED8; }
+.m-post { background: #D1FAE5; color: #065F46; }
+.m-put  { background: #FEF3C7; color: #92400E; }
+.m-del  { background: #FEE2E2; color: #991B1B; }
+.ep-path { font-family: 'Consolas', monospace; font-size: 12px; color: var(--txt); }
+.ep-desc { color: var(--txt-3); font-size: 12px; flex: 1; }
+
+p { margin-bottom: 10px; color: var(--txt-2); }
+ul { padding-left: 18px; color: var(--txt-2); font-size: 13px; }
+ul li { margin-bottom: 4px; }
+
+/* responsive */
+@media (max-width: 900px) {
+  .sidebar { display: none; }
+  .main { margin-left: 0; max-width: 100%; padding: 0 20px 60px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ── SIDEBAR ── -->
+<nav class="sidebar">
+  <div class="sidebar-brand">
+    <div class="logo">Implementation Report</div>
+    <h1>LoRaWAN 데이터 수집 시스템</h1>
+  </div>
+  <div class="toc-section">
+    <div class="toc-section-label">개요</div>
+    <a href="#sec-overview" class="toc-link"><span class="toc-num">01</span> 시스템 개요</a>
+    <a href="#sec-infra" class="toc-link"><span class="toc-num">02</span> 인프라 구성</a>
+    <a href="#sec-regions" class="toc-link"><span class="toc-num">03</span> 주파수 대역 구성</a>
+  </div>
+  <div class="toc-section">
+    <div class="toc-section-label">데이터 흐름</div>
+    <a href="#sec-pipeline" class="toc-link"><span class="toc-num">04</span> 데이터 수집 파이프라인</a>
+    <a href="#sec-mqtt" class="toc-link"><span class="toc-num">05</span> MQTT 메시징 구조</a>
+    <a href="#sec-gw" class="toc-link"><span class="toc-num">06</span> 게이트웨이 브리지</a>
+  </div>
+  <div class="toc-section">
+    <div class="toc-section-label">대시보드 &amp; API</div>
+    <a href="#sec-dashboard" class="toc-link"><span class="toc-num">07</span> 대시보드 기능</a>
+    <a href="#sec-api" class="toc-link"><span class="toc-num">08</span> REST API 목록</a>
+    <a href="#sec-collision" class="toc-link"><span class="toc-num">09</span> 충돌 감지</a>
+    <a href="#sec-downlink" class="toc-link"><span class="toc-num">10</span> 다운링크 ACK</a>
+  </div>
+  <div class="toc-section">
+    <div class="toc-section-label">데이터 &amp; 보안</div>
+    <a href="#sec-db" class="toc-link"><span class="toc-num">11</span> 데이터베이스 구조</a>
+    <a href="#sec-device" class="toc-link"><span class="toc-num">12</span> 디바이스 프로파일</a>
+    <a href="#sec-security" class="toc-link"><span class="toc-num">13</span> 보안 구성</a>
+    <a href="#sec-ops" class="toc-link"><span class="toc-num">14</span> 운영 정책</a>
+  </div>
+</nav>
+
+<!-- ── MAIN ── -->
+<main class="main">
+
+  <!-- Header -->
+  <div class="report-header">
+    <div class="eyebrow">기술 구현 보고서</div>
+    <h1>LoRaWAN 데이터 수집 시스템<br>구현 현황 및 구성 상세</h1>
+    <div class="report-meta">
+      <span class="meta-item"><strong>플랫폼</strong> ChirpStack v4 on Docker</span>
+      <span class="meta-item"><strong>서버 OS</strong> Windows Server 2025 (Korea)</span>
+      <span class="meta-item"><strong>컨테이너 수</strong> 8 services</span>
+      <span class="meta-item"><strong>활성 주파수 대역</strong> KR920, AS923, AS923-2</span>
+      <span class="meta-item"><strong>작성 기준</strong> 현재 docker-compose.yml 및 구성 파일 실측</span>
+    </div>
+  </div>
+
+  <!-- ────────────────────────────────────── 01 -->
+  <section id="sec-overview">
+    <h2><span class="sec-num">01</span> 시스템 개요</h2>
+
+    <p>본 시스템은 LoRaWAN 무선 센서 네트워크에서 수집된 데이터를 한국 서버에서 집중 관리·모니터링하기 위한 풀스택 구현체입니다. ChirpStack v4를 중심으로 8개의 Docker 컨테이너가 협력하며, 외부 LoRa 게이트웨이 → MQTT 브로커 → 네트워크 서버 → 커스텀 대시보드로 이어지는 완전한 데이터 파이프라인을 구성합니다.</p>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="label">Docker 서비스</div>
+        <div class="value">8</div>
+        <div class="sub">컨테이너</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">노출 포트</div>
+        <div class="value">6</div>
+        <div class="sub">외부 접근 포트</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">활성 LoRa 대역</div>
+        <div class="value">3</div>
+        <div class="sub">KR920 / AS923 / AS923-2</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">게이트웨이 접속</div>
+        <div class="value">2</div>
+        <div class="sub">UDP + Basics Station</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">API 엔드포인트</div>
+        <div class="value">17</div>
+        <div class="sub">대시보드 REST API</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">충돌 감지 알고리즘</div>
+        <div class="value">5</div>
+        <div class="sub">종류</div>
+      </div>
+    </div>
+
+    <div class="callout">
+      <strong>구성 파일 위치:</strong> <code>c:\Users\Administrator\chirpstack-docker\</code> — docker-compose.yml 및 configuration/ 하위 디렉터리에 모든 서비스 설정이 포함되어 있습니다.
+    </div>
+  </section>
+
+  <!-- ────────────────────────────────────── 02 -->
+  <section id="sec-infra">
+    <h2><span class="sec-num">02</span> 인프라 구성 (Docker Compose)</h2>
+
+    <p>모든 서비스는 <code>docker-compose.yml</code> 한 파일로 관리됩니다. 컨테이너 간 통신은 Docker 내부 네트워크를 통해 서비스 이름(hostname)으로 이루어집니다.</p>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>서비스</th><th>이미지</th><th>노출 포트</th><th>프로토콜</th><th>역할</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>chirpstack</td>
+            <td>chirpstack/chirpstack:4</td>
+            <td>8080</td>
+            <td><span class="badge b-http">HTTP</span> <span class="badge b-grpc">gRPC</span></td>
+            <td>LoRaWAN 네트워크 서버 + 웹 UI + gRPC API</td>
+          </tr>
+          <tr>
+            <td>chirpstack-gateway-bridge</td>
+            <td>chirpstack/chirpstack-gateway-bridge:4</td>
+            <td>1700/UDP</td>
+            <td><span class="badge b-udp">UDP</span></td>
+            <td>Semtech UDP Packet Forwarder 수신 및 MQTT 변환</td>
+          </tr>
+          <tr>
+            <td>chirpstack-gateway-bridge-basicstation</td>
+            <td>chirpstack/chirpstack-gateway-bridge:4</td>
+            <td>3001/TCP</td>
+            <td><span class="badge b-ws">WebSocket</span></td>
+            <td>Basics Station 프로토콜 수신 및 MQTT 변환</td>
+          </tr>
+          <tr>
+            <td>chirpstack-rest-api</td>
+            <td>chirpstack/chirpstack-rest-api:4</td>
+            <td>8090</td>
+            <td><span class="badge b-http">HTTP/REST</span></td>
+            <td>gRPC → REST JSON 변환 프록시</td>
+          </tr>
+          <tr>
+            <td>mosquitto</td>
+            <td>eclipse-mosquitto:2</td>
+            <td>1883</td>
+            <td><span class="badge b-mqtt">MQTT</span></td>
+            <td>메시지 브로커 — 게이트웨이·서버·대시보드 연결</td>
+          </tr>
+          <tr>
+            <td>dashboard</td>
+            <td>로컬 빌드 (./dashboard)</td>
+            <td>5000</td>
+            <td><span class="badge b-http">HTTP</span></td>
+            <td>커스텀 Flask 모니터링 대시보드</td>
+          </tr>
+          <tr>
+            <td>postgres</td>
+            <td>postgres:14-alpine</td>
+            <td>내부 전용</td>
+            <td>TCP</td>
+            <td>ChirpStack 디바이스·세션 영구 데이터베이스</td>
+          </tr>
+          <tr>
+            <td>redis</td>
+            <td>redis:7-alpine</td>
+            <td>내부 전용</td>
+            <td>TCP</td>
+            <td>ChirpStack 세션 캐시</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Docker 볼륨 (데이터 영속성)</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>볼륨명</th><th>마운트 대상</th><th>저장 내용</th></tr></thead>
+        <tbody>
+          <tr><td>postgresqldata</td><td>postgres:/var/lib/postgresql/data</td><td>디바이스, 세션, 어플리케이션 메타데이터</td></tr>
+          <tr><td>redisdata</td><td>redis:/data</td><td>LoRaWAN 세션 캐시 (FCnt, NwkSKey 등)</td></tr>
+          <tr><td>dashboarddata</td><td>dashboard:/app/data</td><td>SQLite 수신 이력 DB (lora_history.db)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>서비스 의존성 그래프</h3>
+    <pre>postgres ─┐
+redis    ─┼──▶ chirpstack ──────────────────▶ chirpstack-rest-api
+mosquitto ─┘        ▲
+               ┌────┘
+chirpstack-gateway-bridge ──▶ mosquitto
+chirpstack-gateway-bridge-basicstation ──▶ mosquitto
+dashboard ──▶ mosquitto + chirpstack (gRPC)</pre>
+  </section>
+
+  <!-- ────────────────────────────────────── 03 -->
+  <section id="sec-regions">
+    <h2><span class="sec-num">03</span> 주파수 대역 구성</h2>
+
+    <p><code>chirpstack.toml</code>의 <code>enabled_regions</code> 설정 기준. 비활성화된 대역은 주석 처리됩니다.</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>Region ID</th><th>공식명</th><th>상태</th><th>채널 주파수 (MHz)</th><th>MQTT 토픽 접두사</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>kr920</td>
+            <td>KR920</td>
+            <td>✅ 활성</td>
+            <td>922.1 / 922.3 / 922.5 / 922.7 / 922.9 / 923.1 / 923.3</td>
+            <td><code>kr920/</code></td>
+          </tr>
+          <tr>
+            <td>as923</td>
+            <td>AS923</td>
+            <td>✅ 활성</td>
+            <td>923.2 / 923.4</td>
+            <td><code>as923/</code></td>
+          </tr>
+          <tr>
+            <td>as923_2</td>
+            <td>AS923-2</td>
+            <td>✅ 활성</td>
+            <td>921.4 / 921.6 (대역 시프트)</td>
+            <td><code>as923_2/</code></td>
+          </tr>
+          <tr>
+            <td>eu868, us915, au915 외</td>
+            <td>기타 전 세계 대역</td>
+            <td>⬜ 비활성</td>
+            <td>—</td>
+            <td>—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>KR920 채널 상세 (region_kr920.toml)</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>#</th><th>주파수</th><th>대역폭</th><th>변조</th><th>지원 SF</th><th>ADR</th></tr></thead>
+        <tbody>
+          <tr><td>CH0</td><td>922.1 MHz</td><td>125 kHz</td><td>LoRa</td><td>SF7–SF12</td><td>활성 (DR0–DR5)</td></tr>
+          <tr><td>CH1</td><td>922.3 MHz</td><td>125 kHz</td><td>LoRa</td><td>SF7–SF12</td><td>활성</td></tr>
+          <tr><td>CH2</td><td>922.5 MHz</td><td>125 kHz</td><td>LoRa</td><td>SF7–SF12</td><td>활성</td></tr>
+          <tr><td>CH3</td><td>922.7 MHz</td><td>125 kHz</td><td>LoRa</td><td>SF7–SF12</td><td>활성</td></tr>
+          <tr><td>CH4</td><td>922.9 MHz</td><td>125 kHz</td><td>LoRa</td><td>SF7–SF12</td><td>활성</td></tr>
+          <tr><td>CH5</td><td>923.1 MHz</td><td>125 kHz</td><td>LoRa</td><td>SF7–SF12</td><td>활성</td></tr>
+          <tr><td>CH6</td><td>923.3 MHz</td><td>125 kHz</td><td>LoRa</td><td>SF7–SF12</td><td>활성</td></tr>
+          <tr><td>RX2</td><td>921.9 MHz</td><td>—</td><td>LoRa</td><td>DR0 (SF12)</td><td>수신 전용</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout">
+      <strong>베트남 배포 참고:</strong> 베트남 공식 허가 대역은 AS923-1 (923.2 / 923.4 MHz)입니다. 현재 서버에 <code>as923</code> 대역이 활성화되어 있어 베트남 DLOS8N 게이트웨이와 즉시 연동 가능합니다. KR920은 한국 내 테스트 및 운용에 사용됩니다.
+    </div>
+  </section>
+
+  <!-- ────────────────────────────────────── 04 -->
+  <section id="sec-pipeline">
+    <h2><span class="sec-num">04</span> 데이터 수집 파이프라인</h2>
+
+    <p>센서 노드에서 발생한 데이터가 한국 서버 대시보드까지 전달되는 전 과정을 단계별로 기술합니다.</p>
+
+    <!-- Pipeline SVG -->
+    <div class="diag">
+      <svg viewBox="0 0 980 320" xmlns="http://www.w3.org/2000/svg" style="width:100%;min-width:700px;">
+        <defs>
+          <marker id="arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#6B7E96"/>
+          </marker>
+          <marker id="arr-t" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#0C7A69"/>
+          </marker>
+        </defs>
+
+        <!-- Step boxes -->
+        <!-- 1: Node -->
+        <rect x="10" y="100" width="100" height="60" rx="6" fill="#FEF2F2" stroke="#DC2626" stroke-width="1.5"/>
+        <text x="60" y="122" text-anchor="middle" font-size="10" font-weight="700" fill="#DC2626">LoRa 센서</text>
+        <text x="60" y="138" text-anchor="middle" font-size="9" fill="#6B7E96">노드 / End Device</text>
+        <text x="60" y="152" text-anchor="middle" font-size="9" fill="#6B7E96">AES-128 암호화</text>
+
+        <!-- Arrow 1→2 -->
+        <line x1="110" y1="130" x2="148" y2="130" stroke="#6B7E96" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="129" y="122" text-anchor="middle" font-size="8" fill="#DC2626" font-weight="600">LoRa RF</text>
+        <text x="129" y="145" text-anchor="middle" font-size="7.5" fill="#6B7E96">PHY frame</text>
+
+        <!-- 2: Gateway -->
+        <rect x="150" y="80" width="110" height="100" rx="6" fill="#FFFBEB" stroke="#D97706" stroke-width="1.5"/>
+        <text x="205" y="102" text-anchor="middle" font-size="10" font-weight="700" fill="#D97706">LoRa Gateway</text>
+        <text x="205" y="116" text-anchor="middle" font-size="9" fill="#6B7E96">DLOS8N / 기타</text>
+        <line x1="165" y1="128" x2="245" y2="128" stroke="#D97706" stroke-width=".8" stroke-dasharray="3,2"/>
+        <text x="205" y="142" text-anchor="middle" font-size="8.5" fill="#6B7E96">Packet Forwarder</text>
+        <text x="205" y="154" text-anchor="middle" font-size="8.5" fill="#6B7E96">+ Gateway Bridge</text>
+        <text x="205" y="166" text-anchor="middle" font-size="8" fill="#D97706">UDP :1700 (내부)</text>
+
+        <!-- Arrow 2→3 -->
+        <line x1="260" y1="130" x2="298" y2="130" stroke="#6B7E96" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="279" y="120" text-anchor="middle" font-size="8" fill="#059669" font-weight="600">MQTT/TLS</text>
+        <text x="279" y="132" text-anchor="middle" font-size="7.5" fill="#6B7E96">:8883</text>
+        <text x="279" y="144" text-anchor="middle" font-size="7.5" fill="#6B7E96">Protobuf</text>
+
+        <!-- 3: Mosquitto -->
+        <rect x="300" y="100" width="100" height="60" rx="6" fill="#ECFDF5" stroke="#059669" stroke-width="1.5"/>
+        <text x="350" y="122" text-anchor="middle" font-size="10" font-weight="700" fill="#059669">Mosquitto</text>
+        <text x="350" y="138" text-anchor="middle" font-size="9" fill="#6B7E96">MQTT Broker</text>
+        <text x="350" y="152" text-anchor="middle" font-size="9" fill="#059669">:1883</text>
+
+        <!-- Arrow 3→4 -->
+        <line x1="400" y1="130" x2="438" y2="130" stroke="#6B7E96" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="419" y="120" text-anchor="middle" font-size="8" fill="#059669" font-weight="600">MQTT</text>
+        <text x="419" y="132" text-anchor="middle" font-size="7.5" fill="#6B7E96">:1883</text>
+        <text x="419" y="144" text-anchor="middle" font-size="7.5" fill="#6B7E96">Protobuf</text>
+
+        <!-- 4: ChirpStack -->
+        <rect x="440" y="80" width="120" height="100" rx="6" fill="#F0F4FF" stroke="#2563EB" stroke-width="1.5"/>
+        <text x="500" y="102" text-anchor="middle" font-size="10" font-weight="700" fill="#2563EB">ChirpStack NS</text>
+        <text x="500" y="116" text-anchor="middle" font-size="9" fill="#6B7E96">Network Server :8080</text>
+        <line x1="455" y1="128" x2="545" y2="128" stroke="#2563EB" stroke-width=".8" stroke-dasharray="3,2"/>
+        <text x="500" y="142" text-anchor="middle" font-size="8.5" fill="#6B7E96">복호화 (AES-128)</text>
+        <text x="500" y="154" text-anchor="middle" font-size="8.5" fill="#6B7E96">페이로드 디코딩</text>
+        <text x="500" y="166" text-anchor="middle" font-size="8" fill="#2563EB">JSON 이벤트 생성</text>
+
+        <!-- Arrow 4→5 -->
+        <line x1="560" y1="130" x2="598" y2="130" stroke="#6B7E96" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="579" y="120" text-anchor="middle" font-size="8" fill="#059669" font-weight="600">MQTT</text>
+        <text x="579" y="132" text-anchor="middle" font-size="7.5" fill="#6B7E96">:1883</text>
+        <text x="579" y="144" text-anchor="middle" font-size="7.5" fill="#6B7E96">JSON</text>
+
+        <!-- 5: Mosquitto again (loop) -->
+        <rect x="600" y="100" width="100" height="60" rx="6" fill="#ECFDF5" stroke="#059669" stroke-width="1.5"/>
+        <text x="650" y="122" text-anchor="middle" font-size="10" font-weight="700" fill="#059669">Mosquitto</text>
+        <text x="650" y="138" text-anchor="middle" font-size="9" fill="#6B7E96">MQTT Broker</text>
+        <text x="650" y="152" text-anchor="middle" font-size="9" fill="#059669">:1883</text>
+
+        <!-- Arrow 5→6 -->
+        <line x1="700" y1="130" x2="738" y2="130" stroke="#6B7E96" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="719" y="120" text-anchor="middle" font-size="8" fill="#059669" font-weight="600">MQTT sub</text>
+        <text x="719" y="144" text-anchor="middle" font-size="7.5" fill="#6B7E96">JSON</text>
+
+        <!-- 6: Dashboard -->
+        <rect x="740" y="80" width="110" height="100" rx="6" fill="#F5F3FF" stroke="#7C3AED" stroke-width="1.5"/>
+        <text x="795" y="102" text-anchor="middle" font-size="10" font-weight="700" fill="#7C3AED">Dashboard</text>
+        <text x="795" y="116" text-anchor="middle" font-size="9" fill="#6B7E96">Flask :5000</text>
+        <line x1="755" y1="128" x2="835" y2="128" stroke="#7C3AED" stroke-width=".8" stroke-dasharray="3,2"/>
+        <text x="795" y="142" text-anchor="middle" font-size="8.5" fill="#6B7E96">충돌 감지 / SQLite</text>
+        <text x="795" y="154" text-anchor="middle" font-size="8.5" fill="#6B7E96">실시간 웹 UI</text>
+        <text x="795" y="166" text-anchor="middle" font-size="8" fill="#7C3AED">ACK 다운링크</text>
+
+        <!-- Arrow 6→7 -->
+        <line x1="850" y1="130" x2="888" y2="130" stroke="#6B7E96" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="869" y="120" text-anchor="middle" font-size="8" fill="#2563EB" font-weight="600">HTTP</text>
+        <text x="869" y="144" text-anchor="middle" font-size="7.5" fill="#6B7E96">REST/gRPC</text>
+
+        <!-- 7: User/API -->
+        <rect x="890" y="100" width="82" height="60" rx="6" fill="#EFF6FF" stroke="#2563EB" stroke-width="1.5"/>
+        <text x="931" y="124" text-anchor="middle" font-size="10" font-weight="700" fill="#2563EB">API / DB</text>
+        <text x="931" y="140" text-anchor="middle" font-size="8.5" fill="#6B7E96">외부 연동</text>
+        <text x="931" y="153" text-anchor="middle" font-size="8" fill="#2563EB">:8090</text>
+
+        <!-- Step labels below -->
+        <text x="60"  y="200" text-anchor="middle" font-size="9" fill="#6B7E96">① RF</text>
+        <text x="205" y="200" text-anchor="middle" font-size="9" fill="#6B7E96">② GW 처리</text>
+        <text x="350" y="175" text-anchor="middle" font-size="9" fill="#6B7E96">③ 브로커</text>
+        <text x="500" y="200" text-anchor="middle" font-size="9" fill="#6B7E96">④ NS 처리</text>
+        <text x="650" y="175" text-anchor="middle" font-size="9" fill="#6B7E96">⑤ 브로커</text>
+        <text x="795" y="200" text-anchor="middle" font-size="9" fill="#6B7E96">⑥ 대시보드</text>
+        <text x="931" y="175" text-anchor="middle" font-size="9" fill="#6B7E96">⑦ 외부</text>
+
+        <!-- Downlink ACK arrow (bottom) -->
+        <path d="M795 180 Q795 260 500 260 Q300 260 205 230" fill="none" stroke="#7C3AED" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arr)"/>
+        <text x="500" y="255" text-anchor="middle" font-size="8.5" fill="#7C3AED">⬇ 다운링크 ACK (gRPC → MQTT command → Gateway → 노드)</text>
+
+        <!-- Legend -->
+        <g transform="translate(10,285)">
+          <rect x="0" y="0" width="9" height="9" fill="#DC2626" opacity=".25" rx="1"/>
+          <text x="13" y="9" font-size="9" fill="#6B7E96">LoRa RF</text>
+          <rect x="65" y="0" width="9" height="9" fill="#D97706" opacity=".25" rx="1"/>
+          <text x="78" y="9" font-size="9" fill="#6B7E96">UDP</text>
+          <rect x="105" y="0" width="9" height="9" fill="#059669" opacity=".25" rx="1"/>
+          <text x="118" y="9" font-size="9" fill="#6B7E96">MQTT</text>
+          <rect x="158" y="0" width="9" height="9" fill="#2563EB" opacity=".25" rx="1"/>
+          <text x="171" y="9" font-size="9" fill="#6B7E96">HTTP/gRPC</text>
+          <rect x="240" y="0" width="9" height="9" fill="#7C3AED" opacity=".25" rx="1"/>
+          <text x="253" y="9" font-size="9" fill="#6B7E96">Dashboard 처리</text>
+        </g>
+      </svg>
+    </div>
+
+    <h3>단계별 프로토콜 상세</h3>
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>단계</th><th>구간</th><th>프로토콜</th><th>포트</th><th>데이터 형식</th><th>암호화</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>①</td>
+            <td>노드 → 게이트웨이</td>
+            <td><span class="badge b-lora">LoRa RF</span></td>
+            <td>AS923: 923.2/923.4 MHz<br>KR920: 922.1~923.3 MHz</td>
+            <td>LoRaWAN PHY frame (이진)</td>
+            <td>AES-128 (AppSKey + NwkSKey)</td>
+          </tr>
+          <tr>
+            <td>②</td>
+            <td>Packet Forwarder → Gateway Bridge (기기 내부)</td>
+            <td><span class="badge b-udp">UDP</span></td>
+            <td>localhost:1700</td>
+            <td>Semtech UDP JSON (PHYPayload = base64)</td>
+            <td>없음 (내부 통신)</td>
+          </tr>
+          <tr>
+            <td>③</td>
+            <td>게이트웨이 → Mosquitto (인터넷 WAN)</td>
+            <td><span class="badge b-mqtt">MQTT</span> <span class="badge b-enc">TLS</span></td>
+            <td>:8883 (TLS) 또는 :1883</td>
+            <td>Protocol Buffers (UplinkFrame)</td>
+            <td>TLS 1.2+</td>
+          </tr>
+          <tr>
+            <td>④</td>
+            <td>Mosquitto → ChirpStack (Docker 내부)</td>
+            <td><span class="badge b-mqtt">MQTT</span></td>
+            <td>:1883</td>
+            <td>Protocol Buffers (UplinkFrame)</td>
+            <td>없음 (내부 네트워크)</td>
+          </tr>
+          <tr>
+            <td>⑤</td>
+            <td>ChirpStack → Mosquitto (앱 이벤트)</td>
+            <td><span class="badge b-mqtt">MQTT</span></td>
+            <td>:1883</td>
+            <td>JSON (ApplicationUplink event)</td>
+            <td>없음 (내부)</td>
+          </tr>
+          <tr>
+            <td>⑥</td>
+            <td>Mosquitto → Dashboard</td>
+            <td><span class="badge b-mqtt">MQTT</span></td>
+            <td>:1883</td>
+            <td>JSON (복호화 + 코덱 디코딩 완료)</td>
+            <td>없음 (내부)</td>
+          </tr>
+          <tr>
+            <td>⑦</td>
+            <td>외부 시스템 → ChirpStack API</td>
+            <td><span class="badge b-http">REST</span> <span class="badge b-grpc">gRPC</span></td>
+            <td>:8090 (REST) / :8080 (gRPC)</td>
+            <td>JSON (REST) / Protobuf (gRPC)</td>
+            <td>JWT Bearer Token</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>현재 chirpstack.toml의 통합 설정</h3>
+    <pre><span class="cm"># configuration/chirpstack/chirpstack.toml</span>
+[integration]
+  enabled=["mqtt"]       <span class="cm"># MQTT 통합 단독 사용</span>
+
+  [integration.mqtt]
+    server="tcp://$MQTT_BROKER_HOST:1883/"
+    json=true            <span class="cm"># Protobuf 대신 JSON 마샬링 — 대시보드 파싱 최적화</span></pre>
+    <div class="callout">
+      <strong>JSON 마샬링:</strong> ChirpStack의 <code>json=true</code> 설정으로 인해 <strong>앱 레벨 이벤트는 JSON</strong>으로 발행됩니다. 게이트웨이 레벨(Gateway Bridge → Mosquitto 구간)은 여전히 Protobuf를 사용합니다. 대시보드는 JSON 이벤트만 구독하므로 Protobuf 파싱 라이브러리가 불필요합니다.
+    </div>
+  </section>
+
+  <!-- ────────────────────────────────────── 05 -->
+  <section id="sec-mqtt">
+    <h2><span class="sec-num">05</span> MQTT 메시징 구조</h2>
+
+    <p>Mosquitto 브로커(:1883)가 모든 메시지의 허브 역할을 합니다. 토픽은 LoRaWAN 대역 접두사(kr920, as923 등)로 네임스페이스가 분리됩니다.</p>
+
+    <h3>게이트웨이 레벨 토픽 (Gateway Bridge 발행)</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>방향</th><th>토픽 패턴</th><th>형식</th><th>발행자</th></tr></thead>
+        <tbody>
+          <tr><td>업링크</td><td><code>kr920/gateway/{gateway-eui}/event/up</code></td><td>Protobuf · UplinkFrame</td><td>Gateway Bridge</td></tr>
+          <tr><td>통계</td><td><code>kr920/gateway/{gateway-eui}/event/stats</code></td><td>Protobuf · GatewayStats</td><td>Gateway Bridge</td></tr>
+          <tr><td>ACK</td><td><code>kr920/gateway/{gateway-eui}/event/ack</code></td><td>Protobuf · DownlinkTxAck</td><td>Gateway Bridge</td></tr>
+          <tr><td>다운링크 명령</td><td><code>kr920/gateway/{gateway-eui}/command/down</code></td><td>Protobuf · DownlinkFrame</td><td>ChirpStack NS</td></tr>
+          <tr><td>상태</td><td><code>kr920/gateway/{gateway-eui}/state/conn</code></td><td>Protobuf · ConnState</td><td>Gateway Bridge</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>애플리케이션 레벨 토픽 (ChirpStack 발행)</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>이벤트</th><th>토픽 패턴</th><th>형식</th><th>트리거</th></tr></thead>
+        <tbody>
+          <tr><td><strong>업링크</strong></td><td><code>application/{app-id}/device/{dev-eui}/event/up</code></td><td>JSON</td><td>노드 데이터 수신</td></tr>
+          <tr><td>조인</td><td><code>application/{app-id}/device/{dev-eui}/event/join</code></td><td>JSON</td><td>OTAA 조인 성공</td></tr>
+          <tr><td>ACK</td><td><code>application/{app-id}/device/{dev-eui}/event/ack</code></td><td>JSON</td><td>Confirmed 다운링크 ACK</td></tr>
+          <tr><td>TX ACK</td><td><code>application/{app-id}/device/{dev-eui}/event/txack</code></td><td>JSON</td><td>게이트웨이 전송 확인</td></tr>
+          <tr><td>오류</td><td><code>application/{app-id}/device/{dev-eui}/event/log</code></td><td>JSON</td><td>에러 / 경고</td></tr>
+          <tr><td>배터리/마진</td><td><code>application/{app-id}/device/{dev-eui}/event/status</code></td><td>JSON</td><td>DevStatusReq 응답</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>대시보드 구독 토픽</h3>
+    <pre><span class="cm"># dashboard/.env</span>
+SUB_TOPIC=application/+/device/+/event/up
+<span class="cm"># '+' 와일드카드 = 모든 어플리케이션, 모든 디바이스의 업링크 수신</span></pre>
+
+    <h3>최종 업링크 JSON 구조 (대시보드 수신 데이터)</h3>
+    <pre>{
+  "deduplicationId": "5f4a1b2c-...",
+  "time": "2026-05-20T09:30:00.000Z",
+  "deviceInfo": {
+    "deviceName": "zone-a-sensor-01",
+    "devEui":     "0102030405060708",
+    "tags": { "zone": "A" }
+  },
+  "object": {                         <span class="cm">← 코덱 디코딩된 최종 센서값</span>
+    "temperature_3": 27.2,
+    "relative_humidity_5": 50.0
+  },
+  "rxInfo": [{                        <span class="cm">← 수신 게이트웨이 정보</span>
+    "gatewayId": "aabbccddeeff0011",
+    "rssi": -85,
+    "snr":  7.5,
+    "location": { "latitude": 10.762, "longitude": 106.660 }
+  }],
+  "txInfo": {
+    "frequency":  923200000,          <span class="cm">← 923.2 MHz</span>
+    "modulation": { "lora": { "spreadingFactor": 9, "bandwidth": 125000 } }
+  },
+  "fCnt": 142,
+  "fPort": 1,
+  "dr": 3                             <span class="cm">← DR3 = SF9BW125 (AS923 기준)</span>
+}</pre>
+  </section>
+
+  <!-- ────────────────────────────────────── 06 -->
+  <section id="sec-gw">
+    <h2><span class="sec-num">06</span> 게이트웨이 브리지 구성</h2>
+
+    <p>ChirpStack Gateway Bridge는 두 가지 모드로 각각 독립 컨테이너로 실행됩니다.</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>모드</th><th>포트</th><th>프로토콜</th><th>설정 파일</th><th>지원 게이트웨이</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Semtech UDP</td>
+            <td>1700/UDP</td>
+            <td><span class="badge b-udp">UDP</span></td>
+            <td>chirpstack-gateway-bridge.toml</td>
+            <td>대부분의 LoRa 게이트웨이 (DLOS8N 포함)</td>
+          </tr>
+          <tr>
+            <td>Basics Station</td>
+            <td>3001/TCP</td>
+            <td><span class="badge b-ws">WebSocket</span></td>
+            <td>chirpstack-gateway-bridge-basicstation-kr920.toml</td>
+            <td>LoRa Basics Station 지원 게이트웨이</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>MQTT 토픽 설정 (docker-compose.yml 환경변수)</h3>
+    <pre><span class="cm"># chirpstack-gateway-bridge 컨테이너 환경변수</span>
+INTEGRATION__MQTT__EVENT_TOPIC_TEMPLATE=kr920/gateway/{{ .GatewayID }}/event/{{ .EventType }}
+INTEGRATION__MQTT__STATE_TOPIC_TEMPLATE=kr920/gateway/{{ .GatewayID }}/state/{{ .StateType }}
+INTEGRATION__MQTT__COMMAND_TOPIC_TEMPLATE=kr920/gateway/{{ .GatewayID }}/command/#</pre>
+
+    <h3>Basics Station KR920 채널 구성</h3>
+    <pre><span class="cm"># chirpstack-gateway-bridge-basicstation-kr920.toml</span>
+[backend.basic_station]
+  bind=":3001"
+  region="KR920"
+  frequency_min=920900000   <span class="cm"># 920.9 MHz</span>
+  frequency_max=923300000   <span class="cm"># 923.3 MHz</span>
+
+  [[backend.basic_station.concentrators]]
+    [backend.basic_station.concentrators.multi_sf]
+    frequencies=[
+      922100000, 922300000, 922500000, 922700000,
+      922900000, 923100000, 923300000
+    ]</pre>
+
+    <div class="callout warn">
+      <strong>베트남 연동 시 주의:</strong> 현재 Basics Station 설정은 KR920으로 되어 있습니다. 베트남 DLOS8N을 AS923-1로 연결하려면 <code>as923</code> 대역의 Basics Station 설정 파일(<code>chirpstack-gateway-bridge-basicstation-as923.toml</code>)을 사용하고, docker-compose 명령줄을 수정해야 합니다. Semtech UDP(:1700) 방식은 대역 설정 없이 ChirpStack이 자동 감지하므로 DLOS8N의 기본 연결 방식으로 권장합니다.
+    </div>
+  </section>
+
+  <!-- ────────────────────────────────────── 07 -->
+  <section id="sec-dashboard">
+    <h2><span class="sec-num">07</span> 대시보드 기능 (Flask :5000)</h2>
+
+    <p>대시보드는 <code>dashboard/lora_dashboard.py</code> (1,341줄)로 구현된 Python Flask 애플리케이션입니다. MQTT 구독, gRPC 연동, SQLite 저장, 실시간 웹 UI를 단일 프로세스에서 처리합니다.</p>
+
+    <h3>멀티스레드 구조</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>스레드</th><th>역할</th><th>주기</th></tr></thead>
+        <tbody>
+          <tr><td>메인 스레드</td><td>Flask HTTP 서버 (포트 5000)</td><td>상시</td></tr>
+          <tr><td>MQTT 스레드</td><td>Mosquitto 구독 + 이벤트 처리</td><td>상시 (이벤트 기반)</td></tr>
+          <tr><td>GW 폴러 스레드</td><td>ChirpStack gRPC로 게이트웨이 목록 갱신</td><td>30초마다</td></tr>
+          <tr><td>SQLite 쓰기 스레드</td><td>업링크 수신 시 DB 저장 (데몬 스레드)</td><td>이벤트 발생 시</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>페이지 및 기능</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>URL</th><th>페이지명</th><th>주요 기능</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>/</code></td>
+            <td>실시간 모니터링</td>
+            <td>2초 폴링 업링크 테이블, 게이트웨이 카드, SNR/충돌/SF 차트, Leaflet 지도, 노드 등록 모달</td>
+          </tr>
+          <tr>
+            <td><code>/history</code></td>
+            <td>수신 기록</td>
+            <td>30일 일별 패킷 수 차트, 날짜·노드 필터, 페이지네이션 이력 테이블, 기록 삭제</td>
+          </tr>
+          <tr>
+            <td><code>/nodes</code></td>
+            <td>노드 관리</td>
+            <td>ChirpStack 디바이스 CRUD(등록/편집/삭제), 키 조회, 패킷 이력, 샘플 코드 생성</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>JavaScript 폴링 전략 (실시간 업데이트)</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>함수</th><th>주기</th><th>동작</th></tr></thead>
+        <tbody>
+          <tr><td>pollRecentEvents()</td><td>2초</td><td><code>?since_id=N</code> 증분 요청으로 새 이벤트만 수신 (무 flicker)</td></tr>
+          <tr><td>refreshStaticData()</td><td>60초</td><td>요약 통계, SF 분포, SNR 추이 갱신</td></tr>
+          <tr><td>refreshGateways()</td><td>60초</td><td>게이트웨이 카드 목록 갱신</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>의존 라이브러리 (requirements.txt)</h3>
+    <pre>flask==3.1.1
+paho-mqtt==2.1.0
+grpcio==1.76.0
+chirpstack-api==4.15.0
+protobuf==6.33.2
+python-dotenv==1.2.2</pre>
+  </section>
+
+  <!-- ────────────────────────────────────── 08 -->
+  <section id="sec-api">
+    <h2><span class="sec-num">08</span> REST API 엔드포인트 목록</h2>
+
+    <p>대시보드 Flask 서버가 제공하는 17개 엔드포인트입니다. 인증 없이 내부 Docker 네트워크에서 접근 가능합니다.</p>
+
+    <ul class="endpoint-list">
+      <li>
+        <span class="method m-get">GET</span>
+        <span class="ep-path">/api/events</span>
+        <span class="ep-desc">최근 업링크 이벤트 목록 — <code>?since_id=N</code>, <code>?limit=N</code> 지원</span>
+      </li>
+      <li>
+        <span class="method m-get">GET</span>
+        <span class="ep-path">/api/summary</span>
+        <span class="ep-desc">집계 통계 — 총 이벤트, 활성 노드/게이트웨이, 평균 SNR/RSSI, SF·주파수 분포 (30초 캐시)</span>
+      </li>
+      <li>
+        <span class="method m-get">GET</span>
+        <span class="ep-path">/api/collisions</span>
+        <span class="ep-desc">최근 50건 충돌 이벤트 + 원인별·디바이스별 통계</span>
+      </li>
+      <li>
+        <span class="method m-get">GET</span>
+        <span class="ep-path">/api/nodes</span>
+        <span class="ep-desc">노드별 최근 수신 요약 (마지막 RSSI, SNR, SF, 주파수, 연결 GW, last seen)</span>
+      </li>
+      <li>
+        <span class="method m-get">GET</span>
+        <span class="ep-path">/api/gateways</span>
+        <span class="ep-desc">게이트웨이 정보 — ChirpStack gRPC + MQTT 이벤트 데이터 병합, GPS 포함</span>
+      </li>
+      <li>
+        <span class="method m-get">GET</span>
+        <span class="ep-path">/api/history</span>
+        <span class="ep-desc">페이지네이션 이력 — <code>?date</code>, <code>?dev_eui</code>, <code>?page</code>, <code>?per_page</code></span>
+      </li>
+      <li>
+        <span class="method m-get">GET</span>
+        <span class="ep-path">/api/history/devices</span>
+        <span class="ep-desc">이력에 등장하는 디바이스 목록</span>
+      </li>
+      <li>
+        <span class="method m-get">GET</span>
+        <span class="ep-path">/api/history/stats</span>
+        <span class="ep-desc">최근 30일 일별 패킷 수 (차트용)</span>
+      </li>
+      <li>
+        <span class="method m-get">GET</span>
+        <span class="ep-path">/api/node-history/&lt;dev_eui&gt;</span>
+        <span class="ep-desc">특정 노드의 최근 30건 패킷</span>
+      </li>
+      <li>
+        <span class="method m-get">GET</span>
+        <span class="ep-path">/api/applications</span>
+        <span class="ep-desc">ChirpStack 어플리케이션 목록 (gRPC)</span>
+      </li>
+      <li>
+        <span class="method m-get">GET</span>
+        <span class="ep-path">/api/device-profiles</span>
+        <span class="ep-desc">ChirpStack 디바이스 프로파일 목록 (gRPC)</span>
+      </li>
+      <li>
+        <span class="method m-get">GET</span>
+        <span class="ep-path">/api/nodes-list</span>
+        <span class="ep-desc">ChirpStack에 등록된 전체 디바이스 목록 (gRPC)</span>
+      </li>
+      <li>
+        <span class="method m-get">GET</span>
+        <span class="ep-path">/api/node-keys/&lt;dev_eui&gt;</span>
+        <span class="ep-desc">디바이스 JoinEUI, NwkKey, AppKey, GenAppKey 조회 (gRPC)</span>
+      </li>
+      <li>
+        <span class="method m-post">POST</span>
+        <span class="ep-path">/api/register-node</span>
+        <span class="ep-desc">새 디바이스 ChirpStack 등록 — gRPC CreateDevice + CreateDeviceKeys</span>
+      </li>
+      <li>
+        <span class="method m-put">PUT</span>
+        <span class="ep-path">/api/edit-node</span>
+        <span class="ep-desc">디바이스 정보 수정 — gRPC UpdateDevice</span>
+      </li>
+      <li>
+        <span class="method m-del">DELETE</span>
+        <span class="ep-path">/api/delete-node/&lt;dev_eui&gt;</span>
+        <span class="ep-desc">ChirpStack에서 디바이스 삭제 — gRPC DeleteDevice</span>
+      </li>
+      <li>
+        <span class="method m-del">DELETE</span>
+        <span class="ep-path">/api/clear-node-events/&lt;dev_eui&gt;</span>
+        <span class="ep-desc">SQLite에서 해당 노드의 패킷 기록 삭제 (fCnt 기준점 유지)</span>
+      </li>
+      <li>
+        <span class="method m-post">POST</span>
+        <span class="ep-path">/api/reset-node-history/&lt;dev_eui&gt;</span>
+        <span class="ep-desc">기록 전체 삭제 + fCnt 기준점 0으로 초기화</span>
+      </li>
+    </ul>
+  </section>
+
+  <!-- ────────────────────────────────────── 09 -->
+  <section id="sec-collision">
+    <h2><span class="sec-num">09</span> 충돌 감지 알고리즘</h2>
+
+    <p>대시보드는 수신된 업링크 이벤트마다 5가지 알고리즘을 실행하여 패킷 충돌 또는 이상 상태를 감지합니다. 결과는 SQLite <code>collision_detected</code>, <code>collision_reasons</code> 컬럼에 저장됩니다.</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>#</th><th>알고리즘</th><th>감지 조건</th><th>기록 값 예시</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>1</td>
+            <td>FCnt 갭 감지</td>
+            <td>프레임 카운터가 1보다 많이 증가 (중간 패킷 유실)</td>
+            <td><code>fCnt_gap_5</code></td>
+          </tr>
+          <tr>
+            <td>2</td>
+            <td>deduplicationId 중복</td>
+            <td>동일한 MQTT dedup ID가 30초 내 재수신</td>
+            <td><code>dedup_duplicate</code></td>
+          </tr>
+          <tr>
+            <td>3</td>
+            <td>다중 게이트웨이 동일 FCnt</td>
+            <td>동일 게이트웨이에서 같은 FCnt가 30초 내 재수신</td>
+            <td><code>multi_gw_2x</code></td>
+          </tr>
+          <tr>
+            <td>4</td>
+            <td>CRC 오류</td>
+            <td>수신 게이트웨이 수 대비 CRC OK 수가 적음</td>
+            <td><code>crc_error_1</code></td>
+          </tr>
+          <tr>
+            <td>5</td>
+            <td>저 SNR 다중 수신</td>
+            <td>평균 SNR &lt; −5 dB이면서 복수 게이트웨이 수신</td>
+            <td><code>low_snr_-7.2</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ────────────────────────────────────── 10 -->
+  <section id="sec-downlink">
+    <h2><span class="sec-num">10</span> 다운링크 ACK 자동 전송</h2>
+
+    <p>업링크 수신 시 대시보드가 자동으로 ACK 다운링크를 전송합니다. 별도 사용자 개입 없이 동작합니다.</p>
+
+    <h3>동작 흐름</h3>
+    <pre>업링크 수신 (MQTT)
+    │
+    ▼
+gRPC EnqueueDeviceQueueItem 호출
+    ├─ dev_eui      = 송신 노드 EUI
+    ├─ f_port       = 10  (DOWNLINK_FPORT 환경변수)
+    ├─ data         = "{device_name} ack"  (UTF-8 인코딩)
+    └─ confirmed    = False  (DOWNLINK_CONFIRMED 환경변수)
+    │
+    ▼
+ChirpStack → RX1/RX2 윈도우에서 게이트웨이로 전달
+    │
+    ▼
+Gateway → LoRa RF 다운링크 → 노드 수신</pre>
+
+    <h3>관련 환경변수 (.env)</h3>
+    <pre>DOWNLINK_FPORT=10
+DOWNLINK_CONFIRMED=False</pre>
+  </section>
+
+  <!-- ────────────────────────────────────── 11 -->
+  <section id="sec-db">
+    <h2><span class="sec-num">11</span> 데이터베이스 구조</h2>
+
+    <h3>PostgreSQL — ChirpStack 메타데이터</h3>
+    <p>ChirpStack이 내부적으로 관리합니다. 직접 접근 대신 gRPC/REST API를 사용합니다.</p>
+    <div class="tw">
+      <table>
+        <thead><tr><th>저장 데이터</th><th>접근 방법</th></tr></thead>
+        <tbody>
+          <tr><td>어플리케이션, 테넌트</td><td>ChirpStack Web UI / gRPC</td></tr>
+          <tr><td>디바이스 등록 정보, 프로파일</td><td>gRPC DeviceService</td></tr>
+          <tr><td>게이트웨이 등록 정보</td><td>gRPC GatewayService</td></tr>
+          <tr><td>OTAA 조인 세션 키</td><td>내부 자동 관리</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <pre><span class="cm"># PostgreSQL 접속 정보 (Docker 내부 전용)</span>
+Host: postgres (Docker 서비스명)
+DB:   chirpstack
+User: chirpstack / Password: chirpstack
+초기화: pg_trgm, hstore 확장 자동 설치</pre>
+
+    <h3>SQLite — 대시보드 수신 이력</h3>
+    <p>경로: <code>/app/data/lora_history.db</code> (Docker 볼륨 <code>dashboarddata</code> 에 영구 저장)</p>
+
+    <h4 style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--txt-3);margin:16px 0 8px;">테이블: uplink_events</h4>
+    <div class="tw">
+      <table>
+        <thead><tr><th>컬럼</th><th>타입</th><th>설명</th></tr></thead>
+        <tbody>
+          <tr><td>id</td><td>INTEGER PK</td><td>자동 증가</td></tr>
+          <tr><td>time</td><td>TEXT NOT NULL</td><td>수신 시각 (ISO 8601)</td></tr>
+          <tr><td>dev_eui</td><td>TEXT</td><td>디바이스 EUI</td></tr>
+          <tr><td>dev_name</td><td>TEXT</td><td>디바이스 이름</td></tr>
+          <tr><td>dev_addr</td><td>TEXT</td><td>DevAddr (4바이트 세션 주소)</td></tr>
+          <tr><td>f_cnt</td><td>INTEGER</td><td>정규화된 프레임 카운터</td></tr>
+          <tr><td>frequency_mhz</td><td>REAL</td><td>수신 주파수 (MHz)</td></tr>
+          <tr><td>sf</td><td>INTEGER</td><td>Spreading Factor (7–12)</td></tr>
+          <tr><td>bandwidth</td><td>INTEGER</td><td>대역폭 (kHz)</td></tr>
+          <tr><td>code_rate</td><td>TEXT</td><td>코드율 (예: "4/5")</td></tr>
+          <tr><td>dr</td><td>TEXT</td><td>Data Rate 문자열</td></tr>
+          <tr><td>rssi</td><td>TEXT (JSON)</td><td>게이트웨이별 RSSI 배열</td></tr>
+          <tr><td>snr</td><td>TEXT (JSON)</td><td>게이트웨이별 SNR 배열</td></tr>
+          <tr><td>gateways</td><td>TEXT (JSON)</td><td>수신 게이트웨이 ID 목록</td></tr>
+          <tr><td>payload_hex</td><td>TEXT</td><td>복호화된 원시 페이로드 (HEX)</td></tr>
+          <tr><td>payload_text</td><td>TEXT</td><td>복호화된 원시 페이로드 (텍스트)</td></tr>
+          <tr><td>collision_detected</td><td>INTEGER</td><td>충돌 감지 여부 (0/1)</td></tr>
+          <tr><td>collision_reasons</td><td>TEXT (JSON)</td><td>충돌 원인 목록</td></tr>
+          <tr><td>crc_ok_count</td><td>INTEGER</td><td>CRC OK 게이트웨이 수</td></tr>
+          <tr><td>total_gateways</td><td>INTEGER</td><td>총 수신 게이트웨이 수</td></tr>
+          <tr><td>topic</td><td>TEXT</td><td>원본 MQTT 토픽</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4 style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--txt-3);margin:16px 0 8px;">테이블: node_history_state</h4>
+    <div class="tw">
+      <table>
+        <thead><tr><th>컬럼</th><th>타입</th><th>설명</th></tr></thead>
+        <tbody>
+          <tr><td>dev_eui</td><td>TEXT PK</td><td>디바이스 EUI</td></tr>
+          <tr><td>fcnt_base</td><td>INTEGER</td><td>FCnt 정규화 기준점 (최초 수신 FCnt)</td></tr>
+          <tr><td>reset_at</td><td>TEXT</td><td>기준점 마지막 리셋 시각</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>인덱스: <code>time</code>, <code>dev_eui</code>, <code>collision_detected</code> 컬럼에 인덱스 생성으로 검색 성능 최적화.</p>
+
+    <h3>Redis — 세션 캐시</h3>
+    <pre><span class="cm"># redis-server 실행 옵션 (docker-compose)</span>
+redis-server --save 300 1 --save 60 100 --appendonly no
+<span class="cm"># 300초마다 변경 1건 이상이면 스냅샷, 60초마다 100건 이상이면 스냅샷</span>
+<span class="cm"># appendonly off — AOF 비활성화 (성능 우선)</span></pre>
+  </section>
+
+  <!-- ────────────────────────────────────── 12 -->
+  <section id="sec-device">
+    <h2><span class="sec-num">12</span> 디바이스 프로파일</h2>
+
+    <p>현재 ChirpStack에 등록된 테스트 프로파일 (<code>profile1_mod.json</code>)의 실제 설정값입니다.</p>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>항목</th><th>설정값</th></tr></thead>
+        <tbody>
+          <tr><td>프로파일명</td><td>test</td></tr>
+          <tr><td>지역</td><td>KR920</td></tr>
+          <tr><td>LoRaWAN 버전</td><td>1.0.3 / Revision A</td></tr>
+          <tr><td>활성화 방식</td><td>OTAA (Over-the-Air Activation)</td></tr>
+          <tr><td>Class B</td><td>비활성</td></tr>
+          <tr><td>Class C</td><td>비활성</td></tr>
+          <tr><td>ADR 알고리즘</td><td>default (ChirpStack 기본)</td></tr>
+          <tr><td>페이로드 코덱</td><td>NONE (별도 JS 코덱 없음)</td></tr>
+          <tr><td>업링크 인터벌</td><td>10초</td></tr>
+          <tr><td>DevStatus 요청 주기</td><td>1</td></tr>
+          <tr><td>활성화 시 큐 삭제</td><td>활성 (flushQueueOnActivate=true)</td></tr>
+          <tr><td>릴레이 기능</td><td>비활성 (isRelay=false)</td></tr>
+          <tr><td>로밍</td><td>비활성</td></tr>
+          <tr><td>생성일</td><td>2026-05-20</td></tr>
+          <tr><td>최종 수정</td><td>2026-05-22</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout warn">
+      <strong>베트남 배포 전 필수 변경:</strong> 현재 프로파일은 KR920으로 설정되어 있습니다. 베트남 AS923-1 노드를 등록하려면 Region을 <code>AS923</code>으로 지정한 새 디바이스 프로파일을 생성해야 합니다.
+    </div>
+
+    <h3>디바이스 등록 방법</h3>
+    <p>두 가지 방법이 모두 지원됩니다:</p>
+    <ul>
+      <li><strong>웹 UI</strong>: ChirpStack 대시보드 <code>:8080</code> → 디바이스 메뉴</li>
+      <li><strong>커스텀 대시보드</strong>: <code>:5000/nodes</code> → 노드 등록 모달 (DevEUI, AppKey 자동 생성)</li>
+      <li><strong>REST API</strong>: <code>POST /api/register-node</code></li>
+    </ul>
+  </section>
+
+  <!-- ────────────────────────────────────── 13 -->
+  <section id="sec-security">
+    <h2><span class="sec-num">13</span> 보안 구성 현황</h2>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>구간</th><th>인증/암호화</th><th>현재 설정</th><th>비고</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>LoRa RF (노드 → GW)</td>
+            <td>AES-128 암호화</td>
+            <td>항상 적용 (LoRaWAN 표준)</td>
+            <td>AppSKey + NwkSKey 쌍으로 암호화</td>
+          </tr>
+          <tr>
+            <td>Mosquitto MQTT</td>
+            <td>인증 없음</td>
+            <td><code>allow_anonymous true</code></td>
+            <td>내부 Docker 네트워크 한정 — 외부 노출 시 인증 추가 필요</td>
+          </tr>
+          <tr>
+            <td>ChirpStack API</td>
+            <td>JWT Bearer Token</td>
+            <td>Tenant 키 + Admin 키 분리 발급</td>
+            <td>대시보드 .env에 저장</td>
+          </tr>
+          <tr>
+            <td>PostgreSQL</td>
+            <td>비밀번호 인증</td>
+            <td>chirpstack / chirpstack</td>
+            <td>내부 전용 — 외부 포트 미노출</td>
+          </tr>
+          <tr>
+            <td>대시보드 (:5000)</td>
+            <td>인증 없음</td>
+            <td>—</td>
+            <td>현재 내부망 전용 — 외부 공개 시 인증 추가 필요</td>
+          </tr>
+          <tr>
+            <td>WAN 구간 (GW → 서버)</td>
+            <td>MQTT over TLS 권장</td>
+            <td>현재 :1883 (TLS 없음)</td>
+            <td>베트남 → 한국 구간은 TLS :8883 설정 필요</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout warn">
+      <strong>베트남 연결 시 TLS 필수:</strong> Starlink를 통해 베트남 게이트웨이가 한국 서버로 연결할 때는 WAN 구간 암호화가 필요합니다. Mosquitto에 TLS 리스너(:8883) 추가 및 게이트웨이 Bridge 설정에서 <code>servers=["ssl://서버IP:8883"]</code>로 변경해야 합니다.
+    </div>
+  </section>
+
+  <!-- ────────────────────────────────────── 14 -->
+  <section id="sec-ops">
+    <h2><span class="sec-num">14</span> 운영 정책</h2>
+
+    <h3>자동 재시작</h3>
+    <p>모든 컨테이너에 <code>restart: unless-stopped</code> 정책이 적용되어 있어, 서버 재부팅이나 컨테이너 오류 시 자동으로 재시작됩니다.</p>
+
+    <h3>데이터 백업 / 내보내기</h3>
+    <p><code>scripts/</code> 폴더에 PowerShell 스크립트가 제공됩니다:</p>
+    <div class="tw">
+      <table>
+        <thead><tr><th>스크립트</th><th>기능</th></tr></thead>
+        <tbody>
+          <tr><td>export-public.ps1</td><td>공개 가능한 구성 파일만 내보내기 (민감 정보 제외)</td></tr>
+          <tr><td>backup-private.ps1</td><td>API 토큰, .env 등 민감 정보 포함 전체 백업</td></tr>
+          <tr><td>restore-private.ps1</td><td>백업에서 복원</td></tr>
+          <tr><td>common.ps1</td><td>공통 유틸리티 함수</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>디바이스 프로파일 임포트</h3>
+    <pre><span class="cm"># Makefile — 공식 Dragino/RAK 등 디바이스 프로파일 일괄 등록</span>
+make import-device-profiles
+<span class="cm"># chirpstack-device-profiles GitHub 저장소 클론 후 ChirpStack에 자동 등록</span></pre>
+
+    <h3>로그 확인</h3>
+    <pre>docker compose logs -f chirpstack          <span class="cm"># 네트워크 서버 로그</span>
+docker compose logs -f chirpstack-gateway-bridge  <span class="cm"># UDP 브리지 로그</span>
+docker compose logs -f dashboard           <span class="cm"># 대시보드 로그</span></pre>
+
+    <h3>서비스 접근 URL 요약</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>서비스</th><th>URL</th><th>용도</th></tr></thead>
+        <tbody>
+          <tr><td>ChirpStack Web UI</td><td><code>http://[서버IP]:8080</code></td><td>네트워크 서버 관리 화면</td></tr>
+          <tr><td>ChirpStack REST API</td><td><code>http://[서버IP]:8090</code></td><td>REST API (Swagger UI 포함)</td></tr>
+          <tr><td>커스텀 대시보드</td><td><code>http://[서버IP]:5000</code></td><td>실시간 모니터링 및 노드 관리</td></tr>
+          <tr><td>MQTT 브로커</td><td><code>mqtt://[서버IP]:1883</code></td><td>외부 MQTT 클라이언트 연결</td></tr>
+          <tr><td>게이트웨이 (UDP)</td><td><code>udp://[서버IP]:1700</code></td><td>Semtech UDP Packet Forwarder</td></tr>
+          <tr><td>게이트웨이 (BS)</td><td><code>ws://[서버IP]:3001</code></td><td>Basics Station WebSocket</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<script>
+// TOC active link tracking
+const sections = document.querySelectorAll('section[id]');
+const links = document.querySelectorAll('.toc-link');
+const io = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      links.forEach(l => l.classList.remove('active'));
+      const a = document.querySelector(`.toc-link[href="#${e.target.id}"]`);
+      if (a) a.classList.add('active');
+    }
+  });
+}, { rootMargin: '-20% 0px -70% 0px' });
+sections.forEach(s => io.observe(s));
+</script>
+</body>
+</html>

@@ -1,0 +1,821 @@
+<title>LoRaWAN 베트남 배포 — 최종 정리</title>
+
+<style>
+  :root {
+    --bg:         #F1F5FB;
+    --bg-card:    #FFFFFF;
+    --bg-surf:    #E5EDF7;
+    --bg-code:    #EAF0F8;
+    --border:     #C2D0E4;
+    --border-lt:  #D6E2F0;
+    --txt:        #0B1A2C;
+    --txt-2:      #3A5778;
+    --txt-3:      #6E8EAE;
+    --amber:      #C56200;
+    --amber-bg:   #FFF6EB;
+    --cyan:       #005888;
+    --cyan-bg:    #DFF1FC;
+    --green:      #046846;
+    --green-bg:   #EAFAF3;
+    --red:        #AE1B1B;
+    --red-bg:     #FEF0F0;
+    --violet:     #5519A8;
+    --violet-bg:  #F3EEFF;
+    --sans:       'Segoe UI', system-ui, -apple-system, sans-serif;
+    --mono:       'Consolas', 'JetBrains Mono', 'Courier New', monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#06101C;--bg-card:#0B192A;--bg-surf:#0F2035;--bg-code:#081626;
+      --border:#172D47;--border-lt:#1A3252;--txt:#DCE8F4;--txt-2:#7E9CB6;--txt-3:#4B6680;
+      --amber:#F59E0B;--amber-bg:#180F00;--cyan:#36B8F6;--cyan-bg:#031523;
+      --green:#32D193;--green-bg:#031A0F;--red:#F47070;--red-bg:#180404;
+      --violet:#A07CF5;--violet-bg:#110727;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#06101C;--bg-card:#0B192A;--bg-surf:#0F2035;--bg-code:#081626;
+    --border:#172D47;--border-lt:#1A3252;--txt:#DCE8F4;--txt-2:#7E9CB6;--txt-3:#4B6680;
+    --amber:#F59E0B;--amber-bg:#180F00;--cyan:#36B8F6;--cyan-bg:#031523;
+    --green:#32D193;--green-bg:#031A0F;--red:#F47070;--red-bg:#180404;
+    --violet:#A07CF5;--violet-bg:#110727;
+  }
+  :root[data-theme="light"]{
+    --bg:#F1F5FB;--bg-card:#FFFFFF;--bg-surf:#E5EDF7;--bg-code:#EAF0F8;
+    --border:#C2D0E4;--border-lt:#D6E2F0;--txt:#0B1A2C;--txt-2:#3A5778;--txt-3:#6E8EAE;
+    --amber:#C56200;--amber-bg:#FFF6EB;--cyan:#005888;--cyan-bg:#DFF1FC;
+    --green:#046846;--green-bg:#EAFAF3;--red:#AE1B1B;--red-bg:#FEF0F0;
+    --violet:#5519A8;--violet-bg:#F3EEFF;
+  }
+
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:15px;line-height:1.65;padding:44px 24px 100px;}
+  .page{max-width:960px;margin:0 auto;}
+
+  /* Header */
+  .header{margin-bottom:52px;padding-bottom:28px;border-bottom:2px solid var(--border);}
+  .eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--amber);margin-bottom:14px;display:flex;align-items:center;gap:10px;}
+  .eyebrow::after{content:'';flex:1;max-width:60px;height:1px;background:var(--amber);opacity:.4;}
+  h1{font-size:clamp(26px,3.8vw,42px);font-weight:700;letter-spacing:-.025em;line-height:1.1;color:var(--txt);text-wrap:balance;margin-bottom:12px;}
+  .sub{color:var(--txt-2);max-width:580px;font-size:15px;}
+  .pills{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px;}
+  .pill{font-family:var(--mono);font-size:10px;padding:3px 10px;border-radius:3px;background:var(--bg-surf);color:var(--txt-3);border:1px solid var(--border);}
+
+  /* Sections */
+  section{margin-bottom:60px;}
+  h2{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:var(--txt-3);margin-bottom:24px;padding-bottom:9px;border-bottom:1px solid var(--border-lt);}
+  h3{font-size:17px;font-weight:650;letter-spacing:-.01em;color:var(--txt);margin-bottom:8px;margin-top:28px;text-wrap:balance;}
+  h3:first-child{margin-top:0;}
+  h4{font-size:13px;font-weight:700;color:var(--txt);margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em;font-family:var(--mono);}
+  p{color:var(--txt-2);margin-bottom:12px;max-width:720px;}
+  ul{list-style:none;padding:0;}
+  li{color:var(--txt-2);font-size:13.5px;padding:2px 0;}
+
+  /* badge */
+  .badge{display:inline-block;font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;padding:2px 8px;border-radius:3px;margin-bottom:10px;}
+  .bg{background:var(--green-bg);color:var(--green);}
+  .ba{background:var(--amber-bg);color:var(--amber);}
+  .bc{background:var(--cyan-bg);color:var(--cyan);}
+  .br{background:var(--red-bg);color:var(--red);}
+  .bv{background:var(--violet-bg);color:var(--violet);}
+
+  /* diagram */
+  .diag{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:28px 20px 20px;overflow-x:auto;margin-bottom:24px;}
+  .diag svg{display:block;min-width:720px;width:100%;}
+
+  /* grid cards */
+  .grid-3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-bottom:20px;}
+  .grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-bottom:20px;}
+  .card{background:var(--bg-card);border:1px solid var(--border);border-radius:7px;padding:18px 20px;}
+  .card-top{border-top:3px solid var(--border);}
+  .card-top.g{border-top-color:var(--green);}
+  .card-top.a{border-top-color:var(--amber);}
+  .card-top.c{border-top-color:var(--cyan);}
+  .card-top.r{border-top-color:var(--red);}
+
+  /* spec */
+  .specs{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:20px;}
+  .sp{background:var(--bg-surf);border:1px solid var(--border-lt);border-radius:5px;padding:11px 13px;}
+  .sp-l{font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--txt-3);margin-bottom:4px;}
+  .sp-v{font-size:14px;font-weight:700;color:var(--txt);font-family:var(--mono);}
+  .sp-s{font-size:11.5px;color:var(--txt-3);margin-top:2px;}
+
+  /* table */
+  .tw{overflow-x:auto;margin-bottom:20px;}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  th{font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--txt-3);text-align:left;padding:8px 14px;border-bottom:2px solid var(--border);white-space:nowrap;background:var(--bg-surf);}
+  td{padding:10px 14px;border-bottom:1px solid var(--border-lt);vertical-align:top;color:var(--txt-2);line-height:1.5;}
+  tr:last-child td{border-bottom:none;}
+  td:first-child{color:var(--txt);font-weight:600;}
+  .yes{color:var(--green);font-weight:700;}
+  .no{color:var(--red);}
+  .maybe{color:var(--amber);}
+
+  /* callout */
+  .call{border-left:3px solid var(--amber);background:var(--amber-bg);padding:12px 16px;border-radius:0 5px 5px 0;margin-bottom:14px;font-size:13.5px;color:var(--txt-2);max-width:740px;}
+  .call strong{color:var(--amber);}
+  .call.g{border-left-color:var(--green);background:var(--green-bg);}
+  .call.g strong{color:var(--green);}
+  .call.c{border-left-color:var(--cyan);background:var(--cyan-bg);}
+  .call.c strong{color:var(--cyan);}
+  .call.r{border-left-color:var(--red);background:var(--red-bg);}
+  .call.r strong{color:var(--red);}
+
+  /* roadmap */
+  .roadmap{display:flex;flex-direction:column;gap:10px;}
+  .phase{display:flex;gap:14px;align-items:flex-start;padding:16px 18px;background:var(--bg-card);border:1px solid var(--border);border-radius:7px;}
+  .pnum{flex-shrink:0;width:30px;height:30px;border-radius:50%;background:var(--amber-bg);border:1.5px solid var(--amber);font-family:var(--mono);font-size:11px;font-weight:700;color:var(--amber);display:flex;align-items:center;justify-content:center;}
+  .pbody h4{font-size:13.5px;font-weight:600;color:var(--txt);margin-bottom:4px;text-transform:none;letter-spacing:0;font-family:var(--sans);}
+  .pbody p{font-size:13px;margin:0;max-width:100%;}
+
+  /* mini list */
+  .ml li{padding:3px 0;}
+  .ml li::before{margin-right:6px;font-weight:700;}
+  .pro::before{content:'+';color:var(--green);}
+  .con::before{content:'−';color:var(--red);}
+  .dot::before{content:'·';color:var(--txt-3);}
+
+  code{font-family:var(--mono);font-size:12px;background:var(--bg-code);border:1px solid var(--border-lt);padding:1px 5px;border-radius:3px;color:var(--amber);}
+  pre{background:var(--bg-code);border:1px solid var(--border);border-radius:5px;padding:14px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.8;overflow-x:auto;margin-bottom:16px;color:var(--txt);}
+  .cc{color:var(--txt-3);}
+  hr{border:none;border-top:1px solid var(--border-lt);margin:28px 0;}
+
+  /* decision flow */
+  .decision{background:var(--bg-card);border:1px solid var(--border);border-radius:7px;padding:24px;margin-bottom:20px;}
+  .dnode{display:inline-block;padding:7px 14px;border-radius:5px;font-size:13px;font-weight:600;font-family:var(--mono);}
+  .dn-q{background:var(--bg-surf);border:1px solid var(--border);color:var(--txt);}
+  .dn-y{background:var(--green-bg);border:1px solid var(--green);color:var(--green);}
+  .dn-n{background:var(--amber-bg);border:1px solid var(--amber);color:var(--amber);}
+  .dflow{display:flex;flex-direction:column;gap:8px;}
+  .drow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .darr{color:var(--txt-3);font-family:var(--mono);font-size:13px;}
+  .dlabel{font-size:11.5px;color:var(--txt-3);font-family:var(--mono);}
+</style>
+
+<div class="page">
+
+  <!-- ══ HEADER ════════════════════════════════════════════════ -->
+  <header class="header">
+    <div class="eyebrow">Final Summary</div>
+    <h1>베트남 LoRaWAN 배포<br>최종 정리</h1>
+    <p class="sub">드라기노 DLOS8N · AS923-1 · 스타링크 백홀 · ChirpStack v4 기반,<br>
+    4개 지역 원격 데이터 수집 시스템 설계 결론</p>
+    <div class="pills">
+      <span class="pill">Dragino DLOS8N</span>
+      <span class="pill">AS923-1 (Vietnam)</span>
+      <span class="pill">Starlink / zone</span>
+      <span class="pill">ChirpStack v4</span>
+      <span class="pill">4G 없음</span>
+      <span class="pill">ChirpStack Gateway Mesh</span>
+    </div>
+  </header>
+
+
+  <!-- ══ 01. 전제 조건 ═══════════════════════════════════════════ -->
+  <section>
+    <h2>01 · 확정된 전제 조건</h2>
+    <div class="specs">
+      <div class="sp"><div class="sp-l">게이트웨이</div><div class="sp-v">DLOS8N</div><div class="sp-s">Dragino 야외형, SX1302, IP65</div></div>
+      <div class="sp"><div class="sp-l">주파수</div><div class="sp-v">AS923-1</div><div class="sp-s">베트남 공식 대역, 현재 설정에 이미 활성화</div></div>
+      <div class="sp"><div class="sp-l">백홀</div><div class="sp-v">Starlink</div><div class="sp-s">4G 없음, 지역 간 IP 연결 없음</div></div>
+      <div class="sp"><div class="sp-l">네트워크 서버</div><div class="sp-v">ChirpStack v4</div><div class="sp-s">한국 서버 Docker, 현재 운영 중</div></div>
+      <div class="sp"><div class="sp-l">배포 지역</div><div class="sp-v">4개 Zone</div><div class="sp-s">베트남, 지역 간 거리 불명확</div></div>
+      <div class="sp"><div class="sp-l">데이터 방향</div><div class="sp-v">업링크 중심</div><div class="sp-s">센서 → 서버 단방향 수집</div></div>
+    </div>
+  </section>
+
+
+  <!-- ══ 02. 최종 아키텍처 ════════════════════════════════════════ -->
+  <section>
+    <h2>02 · 최종 권장 아키텍처</h2>
+
+    <div class="diag">
+      <svg viewBox="0 0 860 290" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="ar" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,1L0,6L7,3.5Z" fill="#C56200"/></marker>
+          <marker id="ac" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,1L0,6L7,3.5Z" fill="#005888"/></marker>
+          <marker id="ag" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,1L0,6L7,3.5Z" fill="#6E8EAE"/></marker>
+          <style>
+            .t{font-family:'Consolas','Courier New',monospace;}
+            .tl{font-size:8.5px;fill:var(--txt-3,#6E8EAE);}
+            .tb{font-size:9.5px;fill:var(--txt,#0B1A2C);font-weight:700;}
+            .fmt{font-size:7px;fill:var(--txt-3,#6E8EAE);font-family:'Consolas','Courier New',monospace;}
+            .box{fill:var(--bg-card,#FFF);stroke:var(--border,#C2D0E4);stroke-width:1;}
+            .rbg{fill:var(--bg-surf,#E5EDF7);}
+          </style>
+        </defs>
+
+        <!-- ── Vietnam background ── -->
+        <rect x="4" y="4" width="248" height="282" rx="6" class="rbg" opacity="0.55"/>
+        <text x="128" y="282" text-anchor="middle" class="t tl" letter-spacing="1.5">베트남 — 4개 데이터 수집 지역</text>
+
+        <!-- ── Zone A (cy=43) ── -->
+        <rect x="12" y="14" width="228" height="58" rx="5" class="box"/>
+        <text x="22" y="27" class="t tl" letter-spacing=".5">ZONE A</text>
+        <circle cx="38" cy="43" r="8" fill="none" stroke="#C56200" stroke-width="1.3"/>
+        <text x="38" y="47" text-anchor="middle" class="t" style="font-size:8px;fill:#C56200;">N</text>
+        <circle cx="57" cy="43" r="8" fill="none" stroke="#C56200" stroke-width="1.3"/>
+        <text x="57" y="47" text-anchor="middle" class="t" style="font-size:8px;fill:#C56200;">N</text>
+        <line x1="65" y1="43" x2="112" y2="43" stroke="#C56200" stroke-width="1.2" stroke-dasharray="3,2" marker-end="url(#ar)"/>
+        <text x="87" y="38" text-anchor="middle" class="t tl" style="fill:#C56200;font-size:7.5px;">① LoRa</text>
+        <rect x="114" y="25" width="116" height="34" rx="4" fill="var(--cyan-bg,#DFF1FC)" stroke="var(--cyan,#005888)" stroke-width="1.2"/>
+        <text x="172" y="39" text-anchor="middle" class="t tl" style="fill:var(--cyan,#005888);">DLOS8N</text>
+        <text x="172" y="53" text-anchor="middle" class="t" style="font-size:8px;font-weight:700;fill:var(--cyan,#005888);">GW + Bridge</text>
+        <line x1="230" y1="43" x2="252" y2="43" stroke="var(--txt-3,#6E8EAE)" stroke-width="1.3"/>
+        <text x="241" y="39" text-anchor="middle" class="t tl" style="font-size:6.5px;">②</text>
+
+        <!-- ── Zone B (cy=111) ── -->
+        <rect x="12" y="82" width="228" height="58" rx="5" class="box"/>
+        <text x="22" y="95" class="t tl" letter-spacing=".5">ZONE B</text>
+        <circle cx="38" cy="111" r="8" fill="none" stroke="#C56200" stroke-width="1.3"/>
+        <text x="38" y="115" text-anchor="middle" class="t" style="font-size:8px;fill:#C56200;">N</text>
+        <circle cx="57" cy="111" r="8" fill="none" stroke="#C56200" stroke-width="1.3"/>
+        <text x="57" y="115" text-anchor="middle" class="t" style="font-size:8px;fill:#C56200;">N</text>
+        <line x1="65" y1="111" x2="112" y2="111" stroke="#C56200" stroke-width="1.2" stroke-dasharray="3,2" marker-end="url(#ar)"/>
+        <text x="87" y="106" text-anchor="middle" class="t tl" style="fill:#C56200;font-size:7.5px;">① LoRa</text>
+        <rect x="114" y="93" width="116" height="34" rx="4" fill="var(--cyan-bg,#DFF1FC)" stroke="var(--cyan,#005888)" stroke-width="1.2"/>
+        <text x="172" y="107" text-anchor="middle" class="t tl" style="fill:var(--cyan,#005888);">DLOS8N</text>
+        <text x="172" y="121" text-anchor="middle" class="t" style="font-size:8px;font-weight:700;fill:var(--cyan,#005888);">GW + Bridge</text>
+        <line x1="230" y1="111" x2="252" y2="111" stroke="var(--txt-3,#6E8EAE)" stroke-width="1.3"/>
+        <text x="241" y="107" text-anchor="middle" class="t tl" style="font-size:6.5px;">②</text>
+
+        <!-- ── Zone C (cy=179) ── -->
+        <rect x="12" y="150" width="228" height="58" rx="5" class="box"/>
+        <text x="22" y="163" class="t tl" letter-spacing=".5">ZONE C</text>
+        <circle cx="38" cy="179" r="8" fill="none" stroke="#C56200" stroke-width="1.3"/>
+        <text x="38" y="183" text-anchor="middle" class="t" style="font-size:8px;fill:#C56200;">N</text>
+        <circle cx="57" cy="179" r="8" fill="none" stroke="#C56200" stroke-width="1.3"/>
+        <text x="57" y="183" text-anchor="middle" class="t" style="font-size:8px;fill:#C56200;">N</text>
+        <line x1="65" y1="179" x2="112" y2="179" stroke="#C56200" stroke-width="1.2" stroke-dasharray="3,2" marker-end="url(#ar)"/>
+        <text x="87" y="174" text-anchor="middle" class="t tl" style="fill:#C56200;font-size:7.5px;">① LoRa</text>
+        <rect x="114" y="161" width="116" height="34" rx="4" fill="var(--cyan-bg,#DFF1FC)" stroke="var(--cyan,#005888)" stroke-width="1.2"/>
+        <text x="172" y="175" text-anchor="middle" class="t tl" style="fill:var(--cyan,#005888);">DLOS8N</text>
+        <text x="172" y="189" text-anchor="middle" class="t" style="font-size:8px;font-weight:700;fill:var(--cyan,#005888);">GW + Bridge</text>
+        <line x1="230" y1="179" x2="252" y2="179" stroke="var(--txt-3,#6E8EAE)" stroke-width="1.3"/>
+        <text x="241" y="175" text-anchor="middle" class="t tl" style="font-size:6.5px;">②</text>
+
+        <!-- ── Zone D (cy=247) ── -->
+        <rect x="12" y="218" width="228" height="58" rx="5" class="box"/>
+        <text x="22" y="231" class="t tl" letter-spacing=".5">ZONE D</text>
+        <circle cx="38" cy="247" r="8" fill="none" stroke="#C56200" stroke-width="1.3"/>
+        <text x="38" y="251" text-anchor="middle" class="t" style="font-size:8px;fill:#C56200;">N</text>
+        <circle cx="57" cy="247" r="8" fill="none" stroke="#C56200" stroke-width="1.3"/>
+        <text x="57" y="251" text-anchor="middle" class="t" style="font-size:8px;fill:#C56200;">N</text>
+        <line x1="65" y1="247" x2="112" y2="247" stroke="#C56200" stroke-width="1.2" stroke-dasharray="3,2" marker-end="url(#ar)"/>
+        <text x="87" y="242" text-anchor="middle" class="t tl" style="fill:#C56200;font-size:7.5px;">① LoRa</text>
+        <rect x="114" y="229" width="116" height="34" rx="4" fill="var(--cyan-bg,#DFF1FC)" stroke="var(--cyan,#005888)" stroke-width="1.2"/>
+        <text x="172" y="243" text-anchor="middle" class="t tl" style="fill:var(--cyan,#005888);">DLOS8N</text>
+        <text x="172" y="257" text-anchor="middle" class="t" style="font-size:8px;font-weight:700;fill:var(--cyan,#005888);">GW + Bridge</text>
+        <line x1="230" y1="247" x2="252" y2="247" stroke="var(--txt-3,#6E8EAE)" stroke-width="1.3"/>
+        <text x="241" y="243" text-anchor="middle" class="t tl" style="font-size:6.5px;">②</text>
+
+        <!-- ── Vertical collector bus ── -->
+        <line x1="252" y1="43" x2="252" y2="247" stroke="var(--txt-3,#6E8EAE)" stroke-width="1.6"/>
+
+        <!-- ── Bus midpoint → Starlink ── -->
+        <line x1="252" y1="145" x2="272" y2="145" stroke="var(--txt-3,#6E8EAE)" stroke-width="1.6" marker-end="url(#ag)"/>
+
+        <!-- ── Starlink box ── -->
+        <rect x="272" y="105" width="118" height="80" rx="6" fill="var(--bg-card,#FFF)" stroke="var(--border,#C2D0E4)" stroke-width="1.5"/>
+        <g transform="translate(331,131)">
+          <path d="M -18,8 Q 0,-20 18,8" fill="none" stroke="var(--cyan,#005888)" stroke-width="1.8" stroke-linecap="round"/>
+          <line x1="-18" y1="8" x2="18" y2="8" stroke="var(--cyan,#005888)" stroke-width="1.8"/>
+          <circle cx="0" cy="-4" r="2.5" fill="var(--cyan,#005888)"/>
+          <line x1="0" y1="-4" x2="0" y2="8" stroke="var(--cyan,#005888)" stroke-width="1"/>
+          <line x1="0" y1="8" x2="0" y2="20" stroke="var(--cyan,#005888)" stroke-width="1.8"/>
+          <line x1="-10" y1="20" x2="10" y2="20" stroke="var(--cyan,#005888)" stroke-width="1.8"/>
+          <path d="M 22,-2 Q 30,4 22,14" fill="none" stroke="var(--cyan,#005888)" stroke-width="1.2" stroke-dasharray="2.5,2" opacity="0.75"/>
+          <path d="M 29,-9 Q 41,4 29,20" fill="none" stroke="var(--cyan,#005888)" stroke-width="1" stroke-dasharray="2.5,2" opacity="0.45"/>
+        </g>
+        <text x="331" y="174" text-anchor="middle" class="t tl" style="font-size:8px;letter-spacing:.8px;fill:var(--cyan,#005888);">STARLINK</text>
+        <text x="331" y="196" text-anchor="middle" class="t tl">③ MQTT / TLS :8883</text>
+
+        <!-- ── Starlink → Korea ── -->
+        <line x1="390" y1="145" x2="412" y2="145" stroke="var(--cyan,#005888)" stroke-width="2" marker-end="url(#ac)"/>
+
+        <!-- ── Korea background ── -->
+        <rect x="412" y="4" width="444" height="282" rx="6" class="rbg" opacity="0.55"/>
+        <text x="634" y="282" text-anchor="middle" class="t tl" letter-spacing="1.5">한국 서버</text>
+
+        <!-- ── Korea distribution bus ── -->
+        <line x1="428" y1="43"  x2="428" y2="247" stroke="var(--txt-3,#6E8EAE)" stroke-width="1.3"/>
+        <line x1="412" y1="145" x2="428" y2="145" stroke="var(--txt-3,#6E8EAE)" stroke-width="1"/>
+        <line x1="428" y1="43"  x2="442" y2="43"  stroke="var(--txt-3,#6E8EAE)" stroke-width="1" marker-end="url(#ag)"/>
+        <line x1="428" y1="111" x2="442" y2="111" stroke="var(--txt-3,#6E8EAE)" stroke-width="1" marker-end="url(#ag)"/>
+        <line x1="428" y1="179" x2="442" y2="179" stroke="var(--txt-3,#6E8EAE)" stroke-width="1" marker-end="url(#ag)"/>
+        <line x1="428" y1="247" x2="442" y2="247" stroke="var(--txt-3,#6E8EAE)" stroke-width="1" marker-end="url(#ag)"/>
+
+        <!-- Mosquitto (cy=43) -->
+        <rect x="444" y="19" width="200" height="48" rx="5" class="box"/>
+        <text x="458" y="36" class="t tl" letter-spacing=".3px">MQTT BROKER</text>
+        <text x="458" y="53" class="t tb">Mosquitto :8883</text>
+
+        <!-- ChirpStack (cy=111) -->
+        <rect x="444" y="87" width="200" height="48" rx="5" class="box"/>
+        <text x="458" y="104" class="t tl" letter-spacing=".3px">NETWORK SERVER</text>
+        <text x="458" y="121" class="t tb">ChirpStack :8080</text>
+
+        <!-- Dashboard (cy=179) -->
+        <rect x="444" y="155" width="200" height="48" rx="5" class="box"/>
+        <text x="458" y="172" class="t tl" letter-spacing=".3px">DASHBOARD</text>
+        <text x="458" y="189" class="t tb">Flask App :5000</text>
+
+        <!-- REST API (cy=247) -->
+        <rect x="444" y="223" width="200" height="48" rx="5" class="box"/>
+        <text x="458" y="240" class="t tl" letter-spacing=".3px">REST API</text>
+        <text x="458" y="257" class="t tb">ChirpStack :8090</text>
+
+        <!-- ④ label on Korea side -->
+        <text x="458" y="77" class="t tl" style="font-size:7.5px;">④ 내부 MQTT</text>
+      </svg>
+    </div>
+
+    <div class="call g">
+      <strong>기본 원칙:</strong> 지역당 DLOS8N 1대 + 스타링크 1대. 각 게이트웨이가 독립적으로 한국 서버 Mosquitto(포트 8883 TLS)로 연결합니다.
+    </div>
+  </section>
+
+
+  <!-- ══ 02.5 데이터 흐름 쉬운 설명 ═══════════════════════════════════ -->
+  <section>
+    <h2>02.5 · 데이터 흐름 — 단계별 쉬운 설명</h2>
+
+    <div class="call c" style="max-width:100%;margin-bottom:24px;">
+      위 아키텍처 다이어그램의 번호 <strong>①②③④</strong>가 아래 각 단계에 대응합니다.
+    </div>
+
+    <!-- ① LoRa -->
+    <h3>① 노드 → 게이트웨이 : LoRa 무선 신호</h3>
+    <p>센서(노드)가 데이터를 <strong>라디오 전파</strong>로 쏩니다. Wi-Fi와 비슷하지만 전력을 훨씬 적게 쓰고 수 킬로미터를 날아갑니다.</p>
+    <ul>
+      <li><strong>주파수 AS923-1 (923 MHz)</strong> — 베트남에서 허가된 주파수 대역입니다. 나라마다 다릅니다. (한국 922 MHz, 미국 915 MHz)</li>
+      <li><strong>Spreading Factor (SF)</strong> — SF7~SF12. 숫자가 클수록 멀리 가지만 전송 속도는 느려집니다. SF9 기준 약 5 km.</li>
+      <li><strong>AES-128 암호화</strong> — 데이터가 공중을 날아다니므로 전송 전에 암호화합니다. 금융권에서도 쓰는 방식입니다. 게이트웨이는 암호화된 채 그대로 서버로 넘기며, <em>복호화는 ChirpStack 서버만</em> 할 수 있습니다.</li>
+    </ul>
+    <p>공중을 날아다니는 패킷 구조 (PHY frame) — 전체가 수십 바이트짜리 이진 데이터:</p>
+    <pre>[ 헤더 1B ] [ 디바이스주소 4B ] [ 순서번호 2B ] [ 암호화된 센서값 ] [ 무결성코드 4B ]
+   MHDR          DevAddr           FCnt          FRMPayload (AES)      MIC</pre>
+
+    <!-- ② UDP internal -->
+    <h3>② 게이트웨이 내부 : UDP :1700 (기기 내 통신)</h3>
+    <p>DLOS8N 안에는 두 소프트웨어가 협력합니다:</p>
+    <ul>
+      <li><strong>Packet Forwarder</strong> — 라디오 칩에서 신호를 받아 JSON으로 정리</li>
+      <li><strong>Gateway Bridge</strong> — 그 JSON을 받아서 서버 전송 형식(Protobuf)으로 변환</li>
+    </ul>
+    <p>둘 사이는 <strong>UDP 포트 1700</strong>으로 연결됩니다. UDP는 "같은 기기 내부의 빠른 데이터 전달 방식"입니다. 인터넷이 아닌 기기 내부이므로 암호화가 필요 없습니다.</p>
+    <pre>Packet Forwarder → (UDP :1700) → Gateway Bridge
+
+{
+  "rxpk": [{
+    "freq": 923.2,          ← 수신 주파수 MHz
+    "datr": "SF9BW125",     ← SF9, 대역폭 125 kHz
+    "rssi": -85,            ← 신호 강도 (낮을수록 약함)
+    "lsnr": 7.5,            ← 신호 품질 (높을수록 좋음)
+    "data": "QAQ..."        ← 암호화된 센서 데이터 (base64)
+  }]
+}</pre>
+
+    <!-- ③ MQTT/TLS Starlink -->
+    <h3>③ 게이트웨이 → 한국 서버 : MQTT / TLS :8883 (Starlink 구간)</h3>
+    <p>베트남 → 한국을 잇는 핵심 구간. Starlink 위성을 통해 날아갑니다.</p>
+    <ul>
+      <li><strong>MQTT</strong> — 가벼운 메시지 전달 프로토콜. "발행(publish)/구독(subscribe)" 방식. 게이트웨이가 메시지를 발행하면 한국 서버(Mosquitto)가 받아 ChirpStack으로 전달합니다. 카카오톡 채널에 글 올리면 구독자가 받는 것과 유사합니다.</li>
+      <li><strong>TLS :8883</strong> — 인터넷 구간 암호화. HTTPS와 동일한 방식입니다. (포트 8883 = MQTT + TLS 표준 포트)</li>
+      <li><strong>Protobuf</strong> — 전송 데이터 형식. JSON보다 4~5배 작게 압축된 이진 형식입니다. 위성 통신은 대역폭이 제한적이므로 작은 형식이 유리합니다.</li>
+    </ul>
+    <p>MQTT 토픽 예시:</p>
+    <pre>as923/gateway/aabbccddeeff0011/event/up   ← 게이트웨이 업링크 (Protobuf)
+application/app123/device/dev456/event/up  ← 최종 앱 데이터 (JSON)</pre>
+
+    <!-- ④ ChirpStack processing -->
+    <h3>④ 한국 서버 내부 : 복호화 + 디코딩 → JSON</h3>
+    <p>ChirpStack이 순서대로 처리합니다:</p>
+    <ol>
+      <li>Mosquitto 브로커에서 Protobuf 수신</li>
+      <li>AES-128 복호화 → 암호화된 센서 데이터를 읽을 수 있는 상태로</li>
+      <li>페이로드 디코딩 → 바이트를 실제 센서값(온도, 습도 등)으로 변환</li>
+      <li>JSON 이벤트 생성 → Dashboard / API로 전달</li>
+    </ol>
+
+    <div class="grid-2" style="margin-bottom:20px;">
+      <div class="card card-top g">
+        <span class="badge bg">권장 — CayenneLPP</span>
+        <p style="font-size:13px;margin-bottom:8px;">표준 인코딩 형식. ChirpStack이 자동 디코딩하므로 별도 코딩 불필요합니다.</p>
+        <pre style="font-size:11.5px;margin:0;">03 67 01 10  ← 온도 ch3: 27.2 °C
+05 68 64     ← 습도 ch5: 50 %RH</pre>
+      </div>
+      <div class="card card-top a">
+        <span class="badge ba">커스텀 바이너리</span>
+        <p style="font-size:13px;margin-bottom:8px;">바이트를 직접 정의. ChirpStack에 JavaScript 코덱 등록 필요합니다.</p>
+        <pre style="font-size:11.5px;margin:0;">function decodeUplink(input) {
+  return { data: {
+    temperature:
+      (input.bytes[0]&lt;&lt;8
+       | input.bytes[1]) / 10,
+    humidity: input.bytes[2]
+  }};
+}</pre>
+      </div>
+    </div>
+
+    <h3>최종 출력 — Dashboard / API가 받는 JSON</h3>
+    <p>모든 처리가 끝난 후 사람이 읽을 수 있는 형태로 나옵니다. <code>object</code> 필드만 보면 센서값을 바로 알 수 있습니다.</p>
+    <pre>{
+  "deviceInfo": {
+    "deviceName": "zone-a-sensor-01",
+    "devEui":     "0102030405060708"
+  },
+  "object": {                         ← 최종 센서값 (여기만 보면 됨)
+    "temperature_3":       27.2,      ← 27.2 °C
+    "relative_humidity_5": 50.0       ← 50 %RH
+  },
+  "rxInfo": [{
+    "rssi": -85,                      ← 신호 강도 (dBm, 낮을수록 약함)
+    "snr":   7.5                      ← 신호 품질 (높을수록 좋음)
+  }],
+  "txInfo": { "frequency": 923200000 } ← 923.2 MHz
+}</pre>
+
+    <div class="call c" style="max-width:100%;margin-bottom:24px;">
+      <strong>Dashboard 연동:</strong> Flask 대시보드는 <code>application/+/device/+/event/up</code> 토픽을 MQTT 구독합니다. <code>object</code> 필드에 이미 디코딩된 센서 값이 있으므로 별도 파싱 불필요.
+    </div>
+
+    <!-- Glossary -->
+    <h3>용어 한 줄 정리</h3>
+    <div class="tw">
+      <table>
+        <thead><tr><th>용어</th><th>한 줄 설명</th><th>비유</th></tr></thead>
+        <tbody>
+          <tr><td>LoRa RF / AS923-1</td><td>923 MHz 라디오 전파 (베트남 허가 주파수)</td><td>FM 라디오인데 데이터를 실어 보내는 것</td></tr>
+          <tr><td>PHY frame</td><td>공중을 날아다니는 실제 이진 패킷</td><td>봉투에 담긴 암호화된 편지</td></tr>
+          <tr><td>AES-128</td><td>LoRa 페이로드 암호화 방식</td><td>편지 내용을 암호로 써 놓은 것</td></tr>
+          <tr><td>UDP :1700</td><td>기기 내부 소프트웨어 간 통신</td><td>같은 사무실 내 메모 전달</td></tr>
+          <tr><td>MQTT</td><td>발행/구독 방식 메시지 프로토콜</td><td>단체 카카오톡 채널</td></tr>
+          <tr><td>TLS :8883</td><td>인터넷 구간 암호화 (HTTPS와 동일 방식)</td><td>보안 봉인 국제 등기우편</td></tr>
+          <tr><td>Protobuf</td><td>JSON보다 4~5배 작은 이진 데이터 형식</td><td>압축 파일 (.zip)</td></tr>
+          <tr><td>CayenneLPP</td><td>센서값 표준 인코딩 형식 (자동 디코딩)</td><td>미리 정해진 엑셀 서식</td></tr>
+          <tr><td>JSON</td><td>사람이 읽을 수 있는 텍스트 형식</td><td>풀어쓴 보고서</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ══ 03. 릴레이 결론 ══════════════════════════════════════════ -->
+  <section>
+    <h2>03 · 릴레이 관련 최종 결론</h2>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>방법</th><th>LoRa RF 릴레이?</th><th>IP 연결 필요?</th><th>배터리 동작?</th><th>DLOS8N과 호환?</th><th>결론</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>LoRaWAN Relay TS011</td>
+            <td class="yes">가능</td>
+            <td class="no">불필요</td>
+            <td class="yes">가능</td>
+            <td class="maybe">ChirpStack v4.7+ 필요</td>
+            <td>Dragino 제품 없음, 타사(RAK) 필요</td>
+          </tr>
+          <tr>
+            <td>LG02 / OLG02 리피터 모드</td>
+            <td class="yes">가능</td>
+            <td class="no">불필요</td>
+            <td class="no">AC 전원 필요</td>
+            <td class="yes">독립 동작</td>
+            <td>중간 거점에 전원 확보 시 유효</td>
+          </tr>
+          <tr>
+            <td>DLOS8N UDP 프록시</td>
+            <td class="no">불가 (IP 포워딩)</td>
+            <td class="no" style="color:var(--red);">필수</td>
+            <td class="maybe">태양광 가능</td>
+            <td class="yes">설치 가능</td>
+            <td>지역 간 IP 없으면 사용 불가</td>
+          </tr>
+          <tr>
+            <td>P2P 무선 브릿지 (Ubiquiti)</td>
+            <td class="no">LoRa 아님</td>
+            <td class="no">불필요</td>
+            <td class="yes">PoE → 태양광</td>
+            <td class="yes">DLOS8N과 이더넷 연결</td>
+            <td>시야 확보 시 5~30km, 현실적 최선</td>
+          </tr>
+          <tr>
+            <td>ChirpStack Gateway Mesh</td>
+            <td class="yes">가능 (LoRa RF)</td>
+            <td class="yes">Border GW만 필요<br><span style="font-size:11px;color:var(--txt-3);">Relay GW는 불필요</span></td>
+            <td class="yes">전원만 있으면 됨</td>
+            <td class="maybe">수동 설치 필요<br><span style="font-size:11px;color:var(--txt-3);">공식 패키지 미제공</span></td>
+            <td class="yes" style="font-size:13px;">존 내 커버리지 확장 최선책</td>
+          </tr>
+          <tr>
+            <td>지역별 스타링크 독립 연결</td>
+            <td>해당 없음</td>
+            <td class="no">불필요</td>
+            <td>스타링크 전원 필요</td>
+            <td class="yes">현재 구성 그대로</td>
+            <td class="yes" style="font-size:13px;">기본 구성, 가장 단순하고 안정적</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>지역 내 커버리지 확장이 필요할 때</h3>
+    <p>한 지역 안에서 노드가 DLOS8N 직접 도달 범위 밖에 있을 경우의 선택지입니다. 지역마다 Starlink는 Border GW 1대에만 연결하면 됩니다.</p>
+
+    <div class="grid-2">
+      <div class="card card-top g">
+        <span class="badge bg">1순위 — 추가 장비 없음</span>
+        <h4 style="text-transform:none;font-family:var(--sans);letter-spacing:0;font-size:14px;">SF 올리기</h4>
+        <p style="font-size:13px;margin:0;">노드를 SF10~SF12로 설정. 평지 기준 최대 15km 도달. 추가 장비·비용 전혀 없음.</p>
+      </div>
+      <div class="card card-top c">
+        <span class="badge bc">2순위 — 권장</span>
+        <h4 style="text-transform:none;font-family:var(--sans);letter-spacing:0;font-size:14px;">ChirpStack Gateway Mesh</h4>
+        <p style="font-size:13px;margin:0;">DLOS8N 추가 설치 → Relay GW로 동작. 인터넷 불필요, 12V 전원만 있으면 됨. Border GW(Starlink)가 인터넷 처리.</p>
+        <div style="margin-top:10px;font-family:var(--mono);font-size:11px;color:var(--txt-3);">노드 → Relay GW →(LoRa)→ Border GW → Starlink → ChirpStack</div>
+      </div>
+      <div class="card card-top a">
+        <span class="badge ba">3순위 — 고비용</span>
+        <h4 style="text-transform:none;font-family:var(--sans);letter-spacing:0;font-size:14px;">P2P 무선 브릿지</h4>
+        <p style="font-size:13px;margin:0;">DLOS8N 추가 + Ubiquiti 브릿지로 IP 연결. 시야 확보 시 5~30km. Gateway Mesh 설치가 어려울 때 대안.</p>
+      </div>
+      <div class="card card-top r">
+        <span class="badge br">4순위 — AC 전원 필요</span>
+        <h4 style="text-transform:none;font-family:var(--sans);letter-spacing:0;font-size:14px;">OLG02 리피터</h4>
+        <p style="font-size:13px;margin:0;">LoRa RF 재전송, IP 불필요. AC 전원 또는 인버터 필요. 상용 전원이 있는 중간 거점에 설치 가능한 경우.</p>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ══ 03.5 Gateway Mesh 상세 ════════════════════════════════════ -->
+  <section>
+    <h2>03.5 · ChirpStack Gateway Mesh 상세</h2>
+
+    <div class="call c" style="max-width:100%;margin-bottom:20px;">
+      <strong>핵심:</strong> Relay GW는 인터넷이 전혀 없어도 됩니다. 12V 전원만 연결하면 LoRa RF로 Border GW에 패킷을 전달합니다.
+    </div>
+
+    <div class="grid-2" style="margin-bottom:20px;">
+      <div class="card">
+        <span class="badge bc">Border GW (지역당 1대)</span>
+        <ul class="ml" style="margin-top:8px;">
+          <li class="dot">Starlink에 연결 → ChirpStack으로 MQTT/TLS 전달</li>
+          <li class="dot">일반 Gateway Bridge 설정 그대로 사용</li>
+          <li class="dot">Relay GW에서 오는 Mesh 패킷도 함께 수신</li>
+        </ul>
+      </div>
+      <div class="card">
+        <span class="badge bv">Relay GW (커버리지 부족 곳에 추가)</span>
+        <ul class="ml" style="margin-top:8px;">
+          <li class="dot">인터넷 연결 없음 — 12V 전원만</li>
+          <li class="dot">노드 업링크 수신 → LoRa로 Border GW에 재전송</li>
+          <li class="dot">다운링크도 역방향으로 중계 (Border → Relay → 노드)</li>
+          <li class="dot">멀티홉 가능 (최대 8홉)</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>항목</th><th>내용</th></tr></thead>
+        <tbody>
+          <tr><td>소프트웨어</td><td><code>chirpstack-gateway-mesh</code> — ChirpStack 공식 컴포넌트<br>
+            <a href="https://github.com/chirpstack/chirpstack-gateway-mesh" target="_blank" style="font-size:11px;color:var(--cyan);font-family:var(--mono);">github.com/chirpstack/chirpstack-gateway-mesh</a></td></tr>
+          <tr><td>공식 문서</td><td>
+            <a href="https://www.chirpstack.io/docs/chirpstack-gateway-mesh/index.html" target="_blank" style="font-size:12px;color:var(--cyan);font-family:var(--mono);">chirpstack.io/docs/chirpstack-gateway-mesh</a></td></tr>
+          <tr><td>Dragino 설치 참고</td><td>
+            <a href="https://www.chirpstack.io/docs/chirpstack-mqtt-forwarder/install/dragino.html" target="_blank" style="font-size:12px;color:var(--cyan);font-family:var(--mono);">chirpstack.io/docs/…/install/dragino</a><br>
+            <a href="https://forum.chirpstack.io/t/support-gateway-mesh-for-dragino-gateways/22352" target="_blank" style="font-size:11px;color:var(--txt-3);font-family:var(--mono);">포럼: support gateway mesh for dragino gateways</a></td></tr>
+          <tr><td>Relay↔Border 링크</td><td>LoRa RF (별도 채널 사용, 주파수·SF 설정 가능)</td></tr>
+          <tr><td>DLOS8N 설치 방법</td><td>OpenWRT <code>opkg</code>로 바이너리 수동 설치 (공식 Dragino 패키지 없음)</td></tr>
+          <tr><td>지원 칩</td><td>SX1302 ✓ (DLOS8N 칩과 일치)</td></tr>
+          <tr><td>주의</td><td>Relay↔Border 링크도 LoRa 에어타임 소비 → 채널 점유 2배</td></tr>
+          <tr><td>멀티홉</td><td>Relay GW 여러 대 체인 가능 (Relay→Relay→Border)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="call" style="max-width:100%;margin-bottom:12px;">
+      <strong>설치 난이도:</strong> DLOS8N OpenWRT에 SSH 접속 후 <code>chirpstack-gateway-mesh</code> mips_24kc 바이너리를 수동으로 올리고 설정 파일 작성 필요. ChirpStack 공식 문서 + 포럼 참고 (Dragino 전용 패키지는 아직 미제공).
+    </div>
+
+    <div class="call r" style="max-width:100%;">
+      <strong>전원 인프라 주의:</strong> Relay GW는 인터넷이 필요 없지만, <strong style="color:var(--red);">전원 공급 인프라는 Border GW와 동일하게 필요합니다.</strong>
+      설치 위치가 원격지라면 태양광 패널 + 배터리 + MPPT 컨트롤러 + 방수 함체를 Relay GW에도 별도로 구축해야 합니다.
+      "인터넷만 없어도 된다"는 것이지, 무전원 동작은 불가능합니다.
+    </div>
+  </section>
+
+
+  <!-- ══ 04. 현장 구성 ════════════════════════════════════════════ -->
+  <section>
+    <h2>04 · 지역 1개 기준 구성 요소</h2>
+
+    <div class="grid-2">
+      <div class="card">
+        <span class="badge bc">필수</span>
+        <h4 style="text-transform:none;font-family:var(--sans);letter-spacing:0;font-size:14px;margin-bottom:10px;">기본 구성 (모든 지역 동일)</h4>
+        <ul class="ml">
+          <li class="dot">Dragino DLOS8N (AS923 펌웨어)</li>
+          <li class="dot">스타링크 안테나 + 라우터</li>
+          <li class="dot">태양광 패널 50W + 12V 30Ah 배터리</li>
+          <li class="dot">MPPT 충방전 컨트롤러 10A</li>
+          <li class="dot">방수 함체 (게이트웨이 + 배터리)</li>
+          <li class="dot">LoRa 노드 (ABP, unconfirmed uplink 설정)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <span class="badge bv">선택 — 커버리지 부족 시</span>
+        <h4 style="text-transform:none;font-family:var(--sans);letter-spacing:0;font-size:14px;margin-bottom:10px;">커버리지 확장 추가 구성</h4>
+        <ul class="ml">
+          <li class="dot">DLOS8N 추가 + Gateway Mesh (Relay GW) — 12V 전원만, 인터넷 불필요 <strong style="color:var(--cyan);">★ 권장</strong></li>
+          <li class="dot">또는 DLOS8N 추가 + Ubiquiti P2P 브릿지 (IP 연결)</li>
+          <li class="dot">또는 Dragino OLG02 (리피터 모드) — AC 또는 인버터 전원</li>
+          <li class="dot">안테나 마스트 (높은 위치에 GW 설치)</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>게이트웨이 종류별 현장 인프라 요구사항</h3>
+    <p>어떤 GW를 사용하든 설치 위치에 전원 공급 인프라가 필요합니다. Relay GW는 Starlink가 없어도 되지만, 전원 구축 비용·공사는 Border GW와 동일합니다.</p>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>장비</th><th>Starlink</th><th>12V 전원</th><th>태양광+배터리</th><th>방수 함체</th><th>마스트/설치대</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Border GW (DLOS8N)</td>
+            <td class="yes">필요</td>
+            <td class="yes">필요</td>
+            <td class="yes">원격지 필수</td>
+            <td class="yes">필요</td>
+            <td class="yes">필요</td>
+          </tr>
+          <tr>
+            <td>Relay GW (DLOS8N)</td>
+            <td class="no">불필요</td>
+            <td class="yes">필요</td>
+            <td class="yes">원격지 필수</td>
+            <td class="yes">필요</td>
+            <td class="yes">필요</td>
+          </tr>
+          <tr>
+            <td>OLG02 리피터</td>
+            <td class="no">불필요</td>
+            <td class="no">불필요</td>
+            <td class="maybe">AC 또는 인버터</td>
+            <td class="yes">필요</td>
+            <td class="yes">필요</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="call" style="max-width:100%;">
+      <strong>결론:</strong> Relay GW 추가 시 Starlink 비용은 절감되지만, 태양광·배터리·함체·마스트 등 현장 전원 인프라 구축 비용은 동일하게 발생합니다. 설치 위치의 전원 공급 가능 여부를 먼저 확인해야 합니다.
+    </div>
+  </section>
+
+
+  <!-- ══ 05. 설정 변경사항 ════════════════════════════════════════ -->
+  <section>
+    <h2>05 · 한국 서버 설정 변경사항 요약</h2>
+
+    <div class="grid-2">
+      <div>
+        <h3>변경 필요</h3>
+        <div class="call" style="margin-bottom:10px;">
+          <strong>Mosquitto TLS (포트 8883):</strong> 인터넷에서 들어오는 MQTT 연결에 TLS 적용. Let's Encrypt 또는 자체 서명 인증서 발급 후 <code>mosquitto.conf</code>에 리스너 추가.
+        </div>
+        <div class="call" style="margin-bottom:10px;">
+          <strong>docker-compose.yml:</strong> 포트 <code>8883:8883</code> 추가, 인증서 볼륨 마운트 추가.
+        </div>
+        <div class="call">
+          <strong>방화벽:</strong> 포트 8883만 외부 오픈. 8080, 5000은 내부 또는 VPN 전용 유지.
+        </div>
+      </div>
+      <div>
+        <h3>이미 완료</h3>
+        <div class="call g" style="margin-bottom:10px;">
+          <strong>AS923 활성화:</strong> <code>chirpstack.toml</code>에 <code>as923</code> 이미 enabled. 베트남 AS923-1 주파수 별도 설정 불필요.
+        </div>
+        <div class="call g" style="margin-bottom:10px;">
+          <strong>ChirpStack v4 운영 중:</strong> 게이트웨이 추가 등록만 하면 바로 수신 가능.
+        </div>
+        <div class="call g">
+          <strong>Dashboard:</strong> 기존 Flask 대시보드 그대로 사용 가능. 베트남 노드도 동일하게 표시됨.
+        </div>
+      </div>
+    </div>
+
+    <h3>각 현장 DLOS8N에 설정할 Gateway Bridge</h3>
+    <pre><span class="cc"># 각 현장 DLOS8N에서 설정 (웹 GUI 또는 SSH)</span>
+<span class="cc"># LoRa → Packet Forwarder → Server 주소를 한국 서버로 지정</span>
+
+server_address = <span style="color:var(--cyan);">"[한국 서버 공인 IP]"</span>
+serv_port_up   = <span style="color:var(--cyan);">1700</span>
+
+<span class="cc"># Gateway Bridge가 내장된 경우 MQTT 설정</span>
+server   = <span style="color:var(--cyan);">"ssl://[한국 서버 공인 IP]:8883"</span>
+username = <span style="color:var(--cyan);">"gw-zone-a"</span>   <span class="cc"># 지역별 개별 계정</span>
+password = <span style="color:var(--cyan);">"[강력한 패스워드]"</span></pre>
+  </section>
+
+
+  <!-- ══ 06. 노드 설정 권장 ══════════════════════════════════════ -->
+  <section>
+    <h2>06 · 노드 설정 권장사항</h2>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>항목</th><th>권장값</th><th>이유</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>조인 방식</td><td>ABP</td><td>릴레이 거칠 때 OTAA JoinAccept 타이밍 문제 방지</td></tr>
+          <tr><td>업링크 확인</td><td>Unconfirmed</td><td>ACK 다운링크 불필요 → 릴레이 타이밍 제약 없음</td></tr>
+          <tr><td>Spreading Factor</td><td>SF9~SF11</td><td>커버리지와 전송 시간의 균형. 극도로 먼 경우 SF12</td></tr>
+          <tr><td>전송 주기</td><td>5~15분</td><td>LoRaWAN 채널 점유율 1% 이하 유지</td></tr>
+          <tr><td>주파수 플랜</td><td>AS923-1</td><td>베트남 공식 대역, 923.2 / 923.4 MHz 기본 채널</td></tr>
+          <tr><td>전원</td><td>태양광 + 배터리</td><td>장기 무인 운영, Li-SOCl₂ 배터리 5년+ 가능</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ══ 07. 로드맵 ══════════════════════════════════════════════ -->
+  <section>
+    <h2>07 · 구현 로드맵</h2>
+
+    <div class="roadmap">
+      <div class="phase">
+        <div class="pnum">1</div>
+        <div class="pbody">
+          <h4>한국 서버 준비</h4>
+          <p>공인 IP 확인 → TLS 인증서 발급 → Mosquitto 8883 TLS 설정 → <code>docker compose up -d</code> → 방화벽 8883 오픈</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="pnum">2</div>
+        <div class="pbody">
+          <h4>DLOS8N 1대로 로컬 테스트</h4>
+          <p>한국 서버와 같은 네트워크에서 DLOS8N AS923 설정 → Gateway Bridge → Mosquitto TLS 연결 확인 → ChirpStack에서 패킷 수신 확인</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="pnum">3</div>
+        <div class="pbody">
+          <h4>Zone A 파일럿 배포 (베트남)</h4>
+          <p>첫 지역 DLOS8N + 스타링크 설치 → 태양광 연결 → 현장에서 한국 서버로 MQTT TLS 연결 확인 → 노드 ABP 등록 → 패킷 수신 검증 → SF별 도달 거리 실측</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="pnum">4</div>
+        <div class="pbody">
+          <h4>Zone B / C / D 순차 배포</h4>
+          <p>동일 설정 복제 → 지역별 별도 MQTT 계정 적용 → ChirpStack에 게이트웨이 및 노드 등록 → 대시보드에서 전체 지역 모니터링 확인</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="pnum">5</div>
+        <div class="pbody">
+          <h4>커버리지 부족 지점 보완 (필요 시)</h4>
+          <p>실측 후 음영 지역 파악 → SF 상향 우선 → 그래도 불충분 시 DLOS8N Relay GW + ChirpStack Gateway Mesh 추가 설치 (12V 전원만 필요, Starlink 불필요)</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ══ 08. 한눈에 보는 결론 ════════════════════════════════════ -->
+  <section>
+    <h2>08 · 한눈에 보는 최종 결론</h2>
+
+    <div class="grid-2">
+      <div class="call g" style="max-width:100%;margin:0;">
+        <strong>확정 사항</strong><br>
+        · 지역당 DLOS8N 1대 + 스타링크 1대가 기본 단위<br>
+        · AS923-1 이미 활성화됨, 추가 설정 불필요<br>
+        · 한국 ChirpStack 서버에 MQTT TLS(8883)만 추가하면 연결 가능<br>
+        · 노드는 ABP + Unconfirmed Uplink 권장<br>
+        · 기존 Flask 대시보드 그대로 재사용 가능
+      </div>
+      <div class="call r" style="max-width:100%;margin:0;">
+        <strong>불가능 / 주의사항</strong><br>
+        · Dragino 제품 중 배터리 동작 LoRa 패킷 릴레이 → 라인업 없음<br>
+        · DLOS8N UDP 프록시 → 지역 간 IP 연결 없으면 동작 불가<br>
+        · Gateway Mesh Relay↔Border 링크도 LoRa → 에어타임 2배 소비<br>
+        · Gateway Mesh DLOS8N 설치 → 공식 패키지 없음, 수동 빌드 필요
+      </div>
+    </div>
+  </section>
+
+</div>

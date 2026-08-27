@@ -4,208 +4,410 @@
   <meta charset="utf-8" />
   <title>노드 관리 - LoRa Dashboard</title>
   <style>
-    * { box-sizing: border-box; }
-    body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 15px; background: #f0f2f5; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 
+    /* ── 헤더 ── */
     .header {
-      background: white; padding: 15px 20px; border-radius: 8px;
-      margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+      background: white; padding: 12px 20px;
+      border-bottom: 1px solid #e2e8f0;
       display: flex; justify-content: space-between; align-items: center;
+      flex-shrink: 0;
     }
-    .header h1 { margin: 0; font-size: 20px; color: #1e293b; }
-    .header .nav { display: flex; gap: 10px; }
+    .header h1 { font-size: 18px; color: #1e293b; font-weight: 700; }
+    .header .nav { display: flex; gap: 8px; align-items: center; }
 
-    .section {
-      background: white; border-radius: 8px; padding: 20px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 15px;
+    /* ── 버튼 공통 ── */
+    .btn { padding: 7px 14px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; transition: opacity .15s; }
+    .btn:hover { opacity: .85; }
+    .btn-primary { background: linear-gradient(135deg,#667eea,#764ba2); color: white; }
+    .btn-back    { background: #f1f5f9; color: #475569; border: 1.5px solid #cbd5e1; text-decoration: none; display: inline-flex; align-items: center; }
+    .btn-ghost   { background: #f8fafc; color: #334155; border: 1.5px solid #cbd5e1; }
+    .btn-danger  { background: #ef4444; color: white; }
+    .btn-warn    { background: #f97316; color: white; }
+    .btn-blue    { background: #0ea5e9; color: white; }
+    .btn-indigo  { background: #667eea; color: white; }
+    .btn-sm      { padding: 5px 10px; font-size: 12px; }
+
+    /* ── 메인 2패널 ── */
+    .main-layout {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      flex: 1;
+      overflow: hidden;
     }
-    .section-header {
-      display: flex; justify-content: space-between; align-items: center;
-      margin-bottom: 16px; padding-bottom: 12px;
-      border-bottom: 2px solid #667eea;
+
+    /* ── 왼쪽 패널 (노드 목록) ── */
+    .node-list-panel {
+      background: white;
+      border-right: 1px solid #e2e8f0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
-    .section-header h2 { margin: 0; font-size: 16px; color: #1e293b; }
+    .list-toolbar {
+      padding: 12px;
+      border-bottom: 1px solid #f1f5f9;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .search-wrap {
+      position: relative;
+    }
+    .search-wrap input {
+      width: 100%; padding: 8px 10px 8px 32px;
+      border: 1.5px solid #cbd5e1; border-radius: 8px;
+      font-size: 13px; outline: none;
+    }
+    .search-wrap input:focus { border-color: #667eea; }
+    .search-icon {
+      position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+      color: #94a3b8; font-size: 14px; pointer-events: none;
+    }
+    .filter-row { display: flex; gap: 6px; }
+    .filter-row select {
+      flex: 1; padding: 6px 8px; border: 1.5px solid #cbd5e1;
+      border-radius: 6px; font-size: 12px; background: white; min-width: 0;
+    }
+    .node-count { font-size: 11px; color: #94a3b8; padding: 0 2px; }
 
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    thead tr { background: #f8fafc; border-bottom: 2px solid #e2e8f0; }
-    th { padding: 10px 12px; text-align: left; font-weight: 600; color: #475569; }
-    td { padding: 10px 12px; border-bottom: 1px solid #f1f5f9; }
-    tbody tr:hover { background: #f8fafc; }
+    .node-list { flex: 1; overflow-y: auto; }
+    .node-item {
+      display: flex; align-items: center; padding: 11px 14px; gap: 10px;
+      border-bottom: 1px solid #f8fafc; cursor: pointer; transition: background .1s;
+    }
+    .node-item:hover { background: #f8fafc; }
+    .node-item.active { background: #eef2ff; border-left: 3px solid #667eea; }
+    .node-item.active .node-item-name { color: #4338ca; }
+    .node-dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    }
+    .dot-active   { background: #22c55e; }
+    .dot-inactive { background: #94a3b8; }
+    .node-item-body { flex: 1; min-width: 0; }
+    .node-item-name { font-size: 13px; font-weight: 600; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .node-item-sub  { font-size: 11px; color: #94a3b8; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .node-item-time { font-size: 11px; color: #64748b; flex-shrink: 0; text-align: right; white-space: nowrap; }
+    .node-list-empty { padding: 40px 20px; text-align: center; color: #94a3b8; font-size: 13px; }
 
-    .badge-active   { color: #16a34a; font-weight: 600; font-size: 12px; }
-    .badge-inactive { color: #ef4444; font-weight: 600; font-size: 12px; }
+    /* ── 오른쪽 패널 (상세) ── */
+    .detail-panel {
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .detail-placeholder {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      color: #94a3b8;
+    }
+    .detail-placeholder .icon { font-size: 48px; margin-bottom: 12px; }
+    .detail-placeholder p { font-size: 14px; }
 
-    .btn { padding: 6px 14px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
-    .btn-primary  { background: linear-gradient(135deg,#667eea,#764ba2); color: white; }
-    .btn-edit     { background: #667eea; color: white; margin-right: 4px; }
-    .btn-delete   { background: #ef4444; color: white; }
-    .btn-refresh  { background: #f1f5f9; color: #475569; border: 1.5px solid #cbd5e1; }
-    .btn-back     { background: #f1f5f9; color: #475569; border: 1.5px solid #cbd5e1; text-decoration: none;
-                    display: inline-flex; align-items: center; padding: 8px 16px;
-                    border-radius: 8px; font-size: 13px; font-weight: 600; }
+    .detail-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* 상세 헤더 */
+    .detail-header {
+      background: white; padding: 14px 20px; border-bottom: 1px solid #e2e8f0;
+      display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+    }
+    .detail-header-left { display: flex; align-items: center; gap: 10px; }
+    .detail-node-name { font-size: 17px; font-weight: 700; color: #1e293b; }
+    .detail-node-eui  { font-size: 12px; color: #64748b; font-family: monospace; }
+    .detail-status    { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+    .status-active   { background: #dcfce7; color: #16a34a; }
+    .status-inactive { background: #f1f5f9; color: #64748b; }
+    .detail-actions { display: flex; gap: 6px; }
+
+    /* 상세 바디 */
+    .detail-body { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
+
+    /* 정보 카드 */
+    .info-card {
+      background: white; border-radius: 10px; padding: 14px 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    }
+    .info-card-title {
+      font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase;
+      letter-spacing: .05em; margin-bottom: 12px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .info-item label { display: block; font-size: 11px; color: #94a3b8; margin-bottom: 3px; }
+    .info-item .val  { font-size: 13px; color: #1e293b; font-weight: 500; word-break: break-all; }
+    .info-item .val.mono { font-family: monospace; font-size: 12px; }
+    .val-copy-row { display: flex; align-items: center; gap: 6px; }
+    .copy-btn { padding: 2px 7px; font-size: 11px; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 4px; cursor: pointer; color: #475569; }
+
+    /* 패킷 히스토리 */
+    .history-toolbar {
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;
+    }
+    .history-count { font-size: 12px; color: #64748b; }
+    .packet-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .packet-table th { background: #f8fafc; color: #475569; font-weight: 600; padding: 7px 10px; text-align: left; border-bottom: 2px solid #e2e8f0; position: sticky; top: 0; }
+    .packet-table td { padding: 6px 10px; border-bottom: 1px solid #f1f5f9; }
+    .packet-table tr.collision td { background: #fff5f5; color: #c41e3a; }
+    .packet-table .payload-cell { font-family: monospace; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .table-empty { padding: 30px; text-align: center; color: #94a3b8; font-size: 13px; }
+    .load-more-row { text-align: center; padding: 10px; }
+
+    /* 키 섹션 */
+    .key-item { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+    .key-item:last-child { border-bottom: none; }
+    .key-label { font-size: 11px; color: #94a3b8; width: 140px; flex-shrink: 0; }
+    .key-val   { font-family: monospace; font-size: 12px; color: #1e293b; flex: 1; word-break: break-all; }
 
     /* 모달 */
     .modal-bg {
       display: none; position: fixed; inset: 0;
-      background: rgba(0,0,0,0.5); z-index: 1000;
+      background: rgba(0,0,0,0.45); z-index: 1000;
       align-items: center; justify-content: center;
     }
     .modal-box {
-      background: white; border-radius: 12px; padding: 30px;
-      width: 460px; max-width: 95vw;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+      background: white; border-radius: 12px; padding: 28px;
+      width: 480px; max-width: 95vw; max-height: 90vh; overflow-y: auto;
+      box-shadow: 0 8px 32px rgba(0,0,0,.2);
     }
-    .modal-header {
-      display: flex; justify-content: space-between;
-      align-items: center; margin-bottom: 20px;
+    .modal-box.wide { width: 540px; }
+    .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .modal-head h2 { font-size: 17px; color: #1e293b; }
+    .modal-close { background: none; border: none; font-size: 20px; cursor: pointer; color: #94a3b8; }
+    .form-group { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
+    .form-row { display: flex; flex-direction: column; }
+    .form-row label { font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 4px; }
+    .form-row input, .form-row select {
+      padding: 8px 10px; border: 1.5px solid #e2e8f0; border-radius: 6px;
+      font-size: 13px; outline: none; width: 100%;
     }
-    .modal-header h2 { margin: 0; font-size: 18px; }
-    .modal-close { background: none; border: none; font-size: 20px; cursor: pointer; color: #888; }
-    .form-group { display: flex; flex-direction: column; gap: 12px; }
-    .form-group label { font-size: 12px; font-weight: 600; color: #555; }
-    .form-group input, .form-group select {
-      width: 100%; margin-top: 4px; padding: 8px 10px;
-      border: 1.5px solid #ddd; border-radius: 6px; font-size: 13px;
-    }
-    .form-group input:disabled { background: #f8fafc; }
-    .msg-box {
-      display: none; padding: 10px; border-radius: 6px;
-      margin-bottom: 14px; font-size: 13px;
-    }
-    .msg-ok  { background: #dcfce7; color: #16a34a; }
-    .msg-err { background: #fee2e2; color: #dc2626; }
-    .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+    .form-row input:focus, .form-row select:focus { border-color: #667eea; }
+    .form-row input:disabled { background: #f8fafc; color: #64748b; }
+    .form-row .input-row { display: flex; gap: 6px; }
+    .form-row .input-row input { flex: 1; }
+    .msg-box { padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; display: none; }
+    .msg-ok  { background: #dcfce7; color: #16a34a; display: block; }
+    .msg-err { background: #fee2e2; color: #dc2626; display: block; }
+    .modal-actions { display: flex; gap: 8px; }
     .modal-actions button { flex: 1; padding: 10px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+
+    /* 등록 완료 크리덴셜 박스 */
+    .cred-box {
+      background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 8px;
+      padding: 16px; display: flex; flex-direction: column; gap: 12px;
+    }
+    .cred-item { display: flex; flex-direction: column; gap: 4px; }
+    .cred-label { font-size: 11px; font-weight: 600; color: #64748b; }
+    .cred-val-row { display: flex; gap: 8px; align-items: center; }
+    .cred-val { font-family: monospace; font-size: 13px; font-weight: 700; color: #1e293b; flex: 1; word-break: break-all; }
+
+    /* 코드 탭 */
+    .code-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+    .code-tab { padding: 5px 12px; border-radius: 999px; border: 1.5px solid #cbd5e1; background: white; color: #475569; font-size: 12px; font-weight: 700; cursor: pointer; }
+    .code-tab.active { background: linear-gradient(135deg,#667eea,#764ba2); color: white; border-color: transparent; }
+    .code-box { position: relative; background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 14px; overflow: auto; max-height: 300px; }
+    .code-box pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: Consolas,'Courier New',monospace; font-size: 12px; line-height: 1.6; }
+    .code-copy { position: absolute; right: 10px; top: 10px; padding: 5px 10px; border-radius: 5px; border: none; background: rgba(255,255,255,.12); color: white; font-size: 12px; font-weight: 600; cursor: pointer; }
+
+    /* 스크롤바 */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
   </style>
 </head>
 <body>
 
+  <!-- 헤더 -->
   <div class="header">
     <h1>노드 관리</h1>
     <div class="nav">
-      <a href="/" class="btn-back">← 대시보드</a>
-      <button class="btn btn-primary" onclick="openRegisterModal()" style="padding:8px 18px;">+ 노드 등록</button>
+      <a href="/" class="btn btn-back">← 대시보드</a>
+      <button class="btn btn-ghost btn-sm" onclick="openSampleModal()">예시 코드</button>
+      <button class="btn btn-primary" onclick="openRegisterModal()">+ 노드 등록</button>
     </div>
   </div>
 
-  <div class="section">
-    <div class="section-header">
-      <h2>등록된 노드 목록</h2>
-      <button class="btn btn-refresh" onclick="refreshNodeList()">새로고침</button>
-    </div>
-    <div style="overflow-x:auto;">
-      <table>
-        <thead>
-          <tr>
-            <th>상태</th>
-            <th>Device EUI</th>
-            <th>Join EUI</th>
-            <th>이름</th>
-            <th>설명</th>
-            <th>Application</th>
-            <th>Device Profile</th>
-            <th>마지막 수신</th>
-            <th style="text-align:center;">작업</th>
-          </tr>
-        </thead>
-        <tbody id="nodeListBody">
-          <tr><td colspan="9" style="padding:30px;text-align:center;color:#94a3b8;">불러오는 중...</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
+  <!-- 메인 2패널 -->
+  <div class="main-layout">
 
-  <!-- 노드 등록 모달 -->
+    <!-- ── 왼쪽: 노드 목록 ── -->
+    <div class="node-list-panel">
+      <div class="list-toolbar">
+        <div class="search-wrap">
+          <span class="search-icon">🔍</span>
+          <input id="searchInput" type="text" placeholder="이름 또는 DevEUI 검색" oninput="applyFilters()" />
+        </div>
+        <div class="filter-row">
+          <select id="appFilter" onchange="applyFilters()">
+            <option value="">전체 앱</option>
+          </select>
+          <select id="profileFilter" onchange="applyFilters()">
+            <option value="">전체 그룹</option>
+          </select>
+        </div>
+        <div class="node-count" id="nodeCount">불러오는 중...</div>
+      </div>
+      <div class="node-list" id="nodeList">
+        <div class="node-list-empty">불러오는 중...</div>
+      </div>
+    </div>
+
+    <!-- ── 오른쪽: 상세 패널 ── -->
+    <div class="detail-panel" id="detailPanel">
+      <div class="detail-placeholder" id="detailPlaceholder">
+        <div class="icon">📡</div>
+        <p>왼쪽에서 노드를 선택하세요</p>
+      </div>
+      <div class="detail-content" id="detailContent" style="display:none;">
+
+        <!-- 상세 헤더 -->
+        <div class="detail-header">
+          <div class="detail-header-left">
+            <div>
+              <div class="detail-node-name" id="detailName">-</div>
+              <div class="detail-node-eui" id="detailEui">-</div>
+            </div>
+            <span class="detail-status" id="detailStatus"></span>
+          </div>
+          <div class="detail-actions">
+            <button class="btn btn-sm btn-blue" onclick="showKeysForSelected()">🔑 키 조회</button>
+            <button class="btn btn-sm btn-warn" onclick="clearSelected()">패킷 삭제</button>
+            <button class="btn btn-sm btn-ghost" onclick="resetSelected()">기록 초기화</button>
+            <button class="btn btn-sm btn-indigo" onclick="editSelected()">편집</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteSelected()">삭제</button>
+          </div>
+        </div>
+
+        <!-- 상세 바디 -->
+        <div class="detail-body">
+
+          <!-- 노드 기본 정보 -->
+          <div class="info-card">
+            <div class="info-card-title">기본 정보</div>
+            <div class="info-grid">
+              <div class="info-item"><label>DevEUI</label><div class="val mono" id="infoDevEui">-</div></div>
+              <div class="info-item"><label>Join EUI</label><div class="val mono" id="infoJoinEui">-</div></div>
+              <div class="info-item"><label>Application</label><div class="val" id="infoApp">-</div></div>
+              <div class="info-item"><label>Device Profile</label><div class="val" id="infoProfile">-</div></div>
+              <div class="info-item"><label>마지막 수신</label><div class="val" id="infoLastSeen">-</div></div>
+              <div class="info-item"><label>설명</label><div class="val" id="infoDesc">-</div></div>
+            </div>
+          </div>
+
+          <!-- 수신 패킷 히스토리 -->
+          <div class="info-card">
+            <div class="info-card-title">
+              <span>수신 패킷 히스토리</span>
+              <button class="btn btn-ghost btn-sm" onclick="reloadHistory()">새로고침</button>
+            </div>
+            <div class="history-toolbar">
+              <span class="history-count" id="historyCount">-</span>
+            </div>
+            <div style="overflow-x:auto;">
+              <table class="packet-table">
+                <thead>
+                  <tr>
+                    <th>시간</th>
+                    <th>FCnt</th>
+                    <th>SF</th>
+                    <th>주파수</th>
+                    <th>RSSI</th>
+                    <th>SNR</th>
+                    <th>Payload</th>
+                    <th>상태</th>
+                  </tr>
+                </thead>
+                <tbody id="packetBody">
+                  <tr><td colspan="8" class="table-empty">노드를 선택하세요.</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="load-more-row" id="loadMoreRow" style="display:none;">
+              <button class="btn btn-ghost btn-sm" onclick="loadMorePackets()">더 보기</button>
+            </div>
+          </div>
+
+        </div><!-- /detail-body -->
+      </div><!-- /detail-content -->
+    </div><!-- /detail-panel -->
+
+  </div><!-- /main-layout -->
+
+
+  <!-- ══ 모달: 노드 등록 ══ -->
   <div id="registerModal" class="modal-bg">
-    <div class="modal-box" style="width:500px;max-height:90vh;overflow-y:auto;">
-      <div class="modal-header">
+    <div class="modal-box wide">
+      <div class="modal-head">
         <h2>노드 등록</h2>
         <button class="modal-close" onclick="closeRegisterModal()">✕</button>
       </div>
       <div id="registerMsg" class="msg-box"></div>
-
-      <!-- 입력 폼 -->
       <div id="registerForm">
         <div class="form-group">
-          <div>
-            <label>Device EUI / EUI64 (자동 생성)</label>
-            <div style="display:flex;gap:8px;margin-top:4px;">
-              <input id="regDevEui" readonly style="flex:1;padding:8px 10px;border:1.5px solid #ddd;border-radius:6px;font-size:13px;font-family:monospace;background:#f8fafc;" />
-              <button onclick="regenerateCredentials()" style="padding:8px 12px;background:#f1f5f9;border:1.5px solid #cbd5e1;border-radius:6px;font-size:12px;cursor:pointer;white-space:nowrap;">전체 재생성</button>
+          <div class="form-row">
+            <label>Device EUI (자동 생성)</label>
+            <div class="input-row">
+              <input id="regDevEui" readonly style="font-family:monospace;background:#f8fafc;" />
+              <button class="btn btn-ghost btn-sm" onclick="regenerateCredentials()">재생성</button>
             </div>
           </div>
-          <div>
-            <label>Join EUI / EUI64 (자동 생성)</label>
-            <input id="regJoinEui" readonly style="width:100%;margin-top:4px;padding:8px 10px;border:1.5px solid #ddd;border-radius:6px;font-size:13px;font-family:monospace;background:#f8fafc;" />
+          <div class="form-row">
+            <label>Join EUI (자동 생성)</label>
+            <input id="regJoinEui" readonly style="font-family:monospace;background:#f8fafc;" />
           </div>
-          <div>
+          <div class="form-row">
             <label>Application Key (자동 생성)</label>
-            <input id="regAppKey" readonly style="width:100%;margin-top:4px;padding:8px 10px;border:1.5px solid #ddd;border-radius:6px;font-size:13px;font-family:monospace;background:#f8fafc;" />
+            <input id="regAppKey" readonly style="font-family:monospace;background:#f8fafc;" />
           </div>
-          <div>
-            <label>Gen App Key — Remote Multicast Setup (자동 생성)</label>
-            <input id="regGenAppKey" readonly style="width:100%;margin-top:4px;padding:8px 10px;border:1.5px solid #ddd;border-radius:6px;font-size:13px;font-family:monospace;background:#f8fafc;" />
+          <div class="form-row">
+            <label>Gen App Key (자동 생성)</label>
+            <input id="regGenAppKey" readonly style="font-family:monospace;background:#f8fafc;" />
           </div>
-          <div>
+          <div class="form-row">
             <label>이름 *</label>
-            <input id="regName" placeholder="노드 이름" style="width:100%;margin-top:4px;padding:8px 10px;border:1.5px solid #ddd;border-radius:6px;font-size:13px;" />
+            <input id="regName" placeholder="노드 이름" />
           </div>
-          <div>
+          <div class="form-row">
             <label>설명</label>
-            <input id="regDesc" placeholder="(선택)" style="width:100%;margin-top:4px;padding:8px 10px;border:1.5px solid #ddd;border-radius:6px;font-size:13px;" />
+            <input id="regDesc" placeholder="(선택)" />
           </div>
-          <div>
+          <div class="form-row">
             <label>Application *</label>
-            <select id="regApp" style="width:100%;margin-top:4px;padding:8px 10px;border:1.5px solid #ddd;border-radius:6px;font-size:13px;"><option value="">불러오는 중...</option></select>
+            <select id="regApp"><option value="">불러오는 중...</option></select>
           </div>
-          <div>
+          <div class="form-row">
             <label>Device Profile *</label>
-            <select id="regProfile" style="width:100%;margin-top:4px;padding:8px 10px;border:1.5px solid #ddd;border-radius:6px;font-size:13px;"><option value="">불러오는 중...</option></select>
+            <select id="regProfile"><option value="">불러오는 중...</option></select>
           </div>
         </div>
         <div class="modal-actions">
           <button class="btn-primary" onclick="submitRegister()">등록</button>
-          <button style="background:#f1f1f1;" onclick="closeRegisterModal()">취소</button>
+          <button style="background:#f1f5f9;color:#334155;" onclick="closeRegisterModal()">취소</button>
         </div>
       </div>
-
-      <!-- 등록 완료 후 크리덴셜 표시 -->
+      <!-- 등록 완료 -->
       <div id="registerResult" style="display:none;">
-        <div style="background:#dcfce7;border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;color:#166534;font-weight:600;">
+        <div style="background:#dcfce7;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#166534;font-weight:600;">
           등록 완료! 아래 값을 노드에 프로그래밍하세요.
         </div>
-        <div style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:12px;">
-          <div>
-            <div style="font-size:11px;font-weight:600;color:#64748b;margin-bottom:4px;">Device EUI (EUI64)</div>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <code id="resultDevEui" style="font-size:13px;font-weight:700;color:#1e293b;flex:1;word-break:break-all;"></code>
-              <button onclick="copyText('resultDevEui')" style="padding:4px 10px;background:#f1f5f9;border:1.5px solid #cbd5e1;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap;">복사</button>
-            </div>
+        <div class="cred-box">
+          <div class="cred-item">
+            <div class="cred-label">Device EUI (EUI64)</div>
+            <div class="cred-val-row"><code class="cred-val" id="resultDevEui"></code><button class="copy-btn" onclick="copyEl('resultDevEui')">복사</button></div>
           </div>
-          <div>
-            <div style="font-size:11px;font-weight:600;color:#64748b;margin-bottom:4px;">Join EUI (EUI64)</div>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <code id="resultJoinEui" style="font-size:13px;font-weight:700;color:#1e293b;flex:1;word-break:break-all;"></code>
-              <button onclick="copyText('resultJoinEui')" style="padding:4px 10px;background:#f1f5f9;border:1.5px solid #cbd5e1;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap;">복사</button>
-            </div>
+          <div class="cred-item">
+            <div class="cred-label">Join EUI (EUI64)</div>
+            <div class="cred-val-row"><code class="cred-val" id="resultJoinEui"></code><button class="copy-btn" onclick="copyEl('resultJoinEui')">복사</button></div>
           </div>
-          <div>
-            <div style="font-size:11px;font-weight:600;color:#64748b;margin-bottom:4px;">Application Key</div>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <code id="resultAppKey" style="font-size:13px;font-weight:700;color:#1e293b;flex:1;word-break:break-all;"></code>
-              <button onclick="copyText('resultAppKey')" style="padding:4px 10px;background:#f1f5f9;border:1.5px solid #cbd5e1;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap;">복사</button>
-            </div>
+          <div class="cred-item">
+            <div class="cred-label">Application Key</div>
+            <div class="cred-val-row"><code class="cred-val" id="resultAppKey"></code><button class="copy-btn" onclick="copyEl('resultAppKey')">복사</button></div>
           </div>
-          <div>
-            <div style="font-size:11px;font-weight:600;color:#64748b;margin-bottom:4px;">Gen App Key</div>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <code id="resultGenAppKey" style="font-size:13px;font-weight:700;color:#1e293b;flex:1;word-break:break-all;"></code>
-              <button onclick="copyText('resultGenAppKey')" style="padding:4px 10px;background:#f1f5f9;border:1.5px solid #cbd5e1;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap;">복사</button>
-            </div>
+          <div class="cred-item">
+            <div class="cred-label">Gen App Key</div>
+            <div class="cred-val-row"><code class="cred-val" id="resultGenAppKey"></code><button class="copy-btn" onclick="copyEl('resultGenAppKey')">복사</button></div>
           </div>
-          <div>
-            <div style="font-size:11px;font-weight:600;color:#64748b;margin-bottom:4px;">노드 이름</div>
-            <code id="resultName" style="font-size:13px;color:#1e293b;"></code>
+          <div class="cred-item">
+            <div class="cred-label">노드 이름</div>
+            <span class="cred-val" id="resultName" style="font-family:inherit;font-weight:600;"></span>
           </div>
         </div>
         <button onclick="closeRegisterModal()" style="width:100%;margin-top:14px;padding:10px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">확인</button>
@@ -213,22 +415,10 @@
     </div>
   </div>
 
-  <!-- 키 조회 모달 -->
-  <div id="keysModal" class="modal-bg">
-    <div class="modal-box" style="width:520px;">
-      <div class="modal-header">
-        <h2 id="keysModalTitle">키 조회</h2>
-        <button class="modal-close" onclick="document.getElementById('keysModal').style.display='none'">✕</button>
-      </div>
-      <div id="keysModalBody" style="display:flex;flex-direction:column;gap:12px;"></div>
-      <button onclick="document.getElementById('keysModal').style.display='none'" style="width:100%;margin-top:18px;padding:10px;background:#f1f5f9;border:1.5px solid #cbd5e1;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">닫기</button>
-    </div>
-  </div>
-
-  <!-- 노드 편집 모달 -->
+  <!-- ══ 모달: 편집 ══ -->
   <div id="editModal" class="modal-bg">
     <div class="modal-box">
-      <div class="modal-header">
+      <div class="modal-head">
         <h2>노드 편집</h2>
         <button class="modal-close" onclick="closeEditModal()">✕</button>
       </div>
@@ -236,152 +426,353 @@
       <input type="hidden" id="editDevEui" />
       <input type="hidden" id="editAppId" />
       <div class="form-group">
-        <div>
-          <label>DevEUI</label>
-          <input id="editDevEuiShow" disabled />
-        </div>
-        <div>
-          <label>Join EUI (EUI64)</label>
-          <input id="editJoinEui" placeholder="16자리 hex (미입력 시 유지)" style="font-family:monospace;" />
-        </div>
-        <div>
-          <label>이름 *</label>
-          <input id="editName" />
-        </div>
-        <div>
-          <label>설명</label>
-          <input id="editDesc" />
-        </div>
-        <div>
-          <label>Device Profile *</label>
-          <select id="editProfile"></select>
-        </div>
+        <div class="form-row"><label>DevEUI</label><input id="editDevEuiShow" disabled /></div>
+        <div class="form-row"><label>Join EUI (16자리 hex)</label><input id="editJoinEui" placeholder="미입력 시 유지" style="font-family:monospace;" /></div>
+        <div class="form-row"><label>이름 *</label><input id="editName" /></div>
+        <div class="form-row"><label>설명</label><input id="editDesc" /></div>
+        <div class="form-row"><label>Device Profile *</label><select id="editProfile"></select></div>
       </div>
       <div class="modal-actions">
         <button class="btn-primary" onclick="submitEdit()">저장</button>
-        <button style="background:#f1f1f1;" onclick="closeEditModal()">취소</button>
+        <button style="background:#f1f5f9;color:#334155;" onclick="closeEditModal()">취소</button>
       </div>
     </div>
   </div>
 
+  <!-- ══ 모달: 키 조회 ══ -->
+  <div id="keysModal" class="modal-bg">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h2 id="keysModalTitle">키 조회</h2>
+        <button class="modal-close" onclick="closeModal('keysModal')">✕</button>
+      </div>
+      <div id="keysBody" style="display:flex;flex-direction:column;gap:4px;"></div>
+      <button onclick="closeModal('keysModal')" style="width:100%;margin-top:18px;padding:9px;background:#f1f5f9;border:1.5px solid #cbd5e1;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">닫기</button>
+    </div>
+  </div>
+
+  <!-- ══ 모달: 예시 코드 ══ -->
+  <div id="sampleModal" class="modal-bg">
+    <div class="modal-box" style="width:680px;max-width:96vw;">
+      <div class="modal-head">
+        <h2>API 예시 코드</h2>
+        <button class="modal-close" onclick="closeModal('sampleModal')">✕</button>
+      </div>
+      <div class="code-tabs">
+        <button class="code-tab active" data-tab="curl"   onclick="switchCodeTab('curl')">cURL</button>
+        <button class="code-tab"        data-tab="python" onclick="switchCodeTab('python')">Python</button>
+        <button class="code-tab"        data-tab="js"     onclick="switchCodeTab('js')">JavaScript</button>
+      </div>
+      <div class="code-box">
+        <button class="code-copy" onclick="copyCode()">복사</button>
+        <pre id="codeBlock"></pre>
+      </div>
+      <p style="font-size:12px;color:#64748b;margin-top:10px;">선택된 노드의 DevEUI가 자동으로 채워집니다.</p>
+      <button onclick="closeModal('sampleModal')" style="width:100%;margin-top:14px;padding:9px;background:#f1f5f9;border:1.5px solid #cbd5e1;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">닫기</button>
+    </div>
+  </div>
+
   <script>
-    // ===== 노드 목록 =====
-    function refreshNodeList() {
-      const tbody = document.getElementById('nodeListBody');
-      tbody.innerHTML = '<tr><td colspan="7" style="padding:30px;text-align:center;color:#94a3b8;">불러오는 중...</td></tr>';
+    // ══════════════════════════════════════════
+    //  상태
+    // ══════════════════════════════════════════
+    let allNodes = [];
+    let selectedNode = null;
+    let packetStore = [];
+    let packetRendered = 0;
+    const PAGE_SIZE = 100;
+    let codeTabType = 'curl';
+
+    const codeTemplates = {
+      curl:   (h, e) => `curl "http://${h}/api/node-history/${e}"`,
+      python: (h, e) => `import requests\n\nhost = "${h}"\ndev_eui = "${e}"\n\nr = requests.get(f"http://{host}/api/node-history/{dev_eui}")\nr.raise_for_status()\ndata = r.json()\n\nprint(f"총 {data['total']}개 패킷")\nfor row in data["events"]:\n    print(row["time"], row["dev_name"], row["payload_text"] or row["payload_hex"])`,
+      js:     (h, e) => `fetch('http://${h}/api/node-history/${encodeURIComponent(e)}')\n  .then(r => r.json())\n  .then(data => {\n    console.log(\`총 \${data.total}개 패킷\`);\n    data.events.forEach(row => {\n      console.log(row.time, row.dev_name, row.payload_text || row.payload_hex);\n    });\n  });`
+    };
+
+    // ══════════════════════════════════════════
+    //  노드 목록 로드 & 렌더
+    // ══════════════════════════════════════════
+    function loadNodeList() {
+      document.getElementById('nodeCount').textContent = '불러오는 중...';
       fetch('/api/nodes-list')
         .then(r => r.json())
         .then(nodes => {
-          if (nodes.error) {
-            tbody.innerHTML = `<tr><td colspan="9" style="padding:30px;text-align:center;color:#ef4444;">오류: ${nodes.error}</td></tr>`;
-            return;
-          }
-          if (!nodes.length) {
-            tbody.innerHTML = '<tr><td colspan="9" style="padding:30px;text-align:center;color:#94a3b8;">등록된 노드 없음</td></tr>';
-            return;
-          }
-          tbody.innerHTML = '';
-          nodes.forEach(n => {
-            const tr = document.createElement('tr');
-            const stateLabel = n.is_disabled
-              ? '<span class="badge-inactive">비활성</span>'
-              : '<span class="badge-active">활성</span>';
-            tr.innerHTML = `
-              <td>${stateLabel}</td>
-              <td style="font-family:monospace;font-size:12px;">${n.dev_eui}</td>
-              <td style="font-family:monospace;font-size:12px;color:#64748b;">${n.join_eui || '-'}</td>
-              <td style="font-weight:600;">${n.name}</td>
-              <td style="color:#64748b;">${n.description || '-'}</td>
-              <td>${n.application_name}</td>
-              <td>${n.device_profile_name || n.device_profile_id}</td>
-              <td style="font-size:12px;color:#64748b;">${n.last_seen || '-'}</td>
-              <td style="text-align:center;white-space:nowrap;">
-                <button class="btn btn-edit" onclick='openKeysModal("${n.dev_eui}","${n.name}")' style="background:#0ea5e9;">키 조회</button>
-                <button class="btn btn-edit" onclick='openEditModal(${JSON.stringify(n)})'>편집</button>
-                <button class="btn btn-delete" onclick='deleteNode("${n.dev_eui}","${n.name}")'>삭제</button>
-              </td>
-            `;
-            tbody.appendChild(tr);
-          });
+          if (nodes.error) { document.getElementById('nodeList').innerHTML = `<div class="node-list-empty">오류: ${nodes.error}</div>`; return; }
+          allNodes = Array.isArray(nodes) ? nodes : [];
+          populateFilterOptions();
+          applyFilters();
+        })
+        .catch(e => { document.getElementById('nodeList').innerHTML = `<div class="node-list-empty">요청 실패: ${e}</div>`; });
+    }
+
+    function populateFilterOptions() {
+      const apps = new Map(), profiles = new Map();
+      allNodes.forEach(n => {
+        if (n.application_id) apps.set(n.application_id, n.application_name || n.application_id);
+        if (n.device_profile_id) profiles.set(n.device_profile_id, n.device_profile_name || n.device_profile_id);
+      });
+      const appSel = document.getElementById('appFilter');
+      const curApp = appSel.value;
+      appSel.innerHTML = '<option value="">전체 앱</option>' +
+        [...apps.entries()].map(([id, name]) => `<option value="${id}">${name}</option>`).join('');
+      appSel.value = curApp;
+
+      const profSel = document.getElementById('profileFilter');
+      const curProf = profSel.value;
+      profSel.innerHTML = '<option value="">전체 그룹</option>' +
+        [...profiles.entries()].map(([id, name]) => `<option value="${id}">${name}</option>`).join('');
+      profSel.value = curProf;
+    }
+
+    function applyFilters() {
+      const q      = document.getElementById('searchInput').value.toLowerCase();
+      const appId  = document.getElementById('appFilter').value;
+      const profId = document.getElementById('profileFilter').value;
+
+      const filtered = allNodes.filter(n => {
+        if (appId  && n.application_id    !== appId)  return false;
+        if (profId && n.device_profile_id !== profId)  return false;
+        if (q && !n.name.toLowerCase().includes(q) && !n.dev_eui.toLowerCase().includes(q)) return false;
+        return true;
+      });
+
+      document.getElementById('nodeCount').textContent = `${filtered.length} / ${allNodes.length}개 노드`;
+      renderNodeList(filtered);
+    }
+
+    function renderNodeList(nodes) {
+      const container = document.getElementById('nodeList');
+      if (!nodes.length) {
+        container.innerHTML = '<div class="node-list-empty">해당하는 노드가 없습니다.</div>';
+        return;
+      }
+      container.innerHTML = '';
+      nodes.forEach(n => {
+        const div = document.createElement('div');
+        div.className = 'node-item' + (selectedNode && selectedNode.dev_eui === n.dev_eui ? ' active' : '');
+        div.dataset.devEui = n.dev_eui;
+        div.innerHTML = `
+          <span class="node-dot ${n.is_disabled ? 'dot-inactive' : 'dot-active'}"></span>
+          <div class="node-item-body">
+            <div class="node-item-name">${esc(n.name)}</div>
+            <div class="node-item-sub">${n.dev_eui} · ${n.application_name || '-'}</div>
+          </div>
+          <div class="node-item-time">${n.last_seen ? n.last_seen.split(' ')[1] || n.last_seen : '-'}</div>
+        `;
+        div.onclick = () => selectNode(n);
+        container.appendChild(div);
+      });
+    }
+
+    // ══════════════════════════════════════════
+    //  노드 선택 & 상세 패널
+    // ══════════════════════════════════════════
+    function selectNode(node) {
+      selectedNode = node;
+
+      // 목록 활성화 표시
+      document.querySelectorAll('.node-item').forEach(el => {
+        el.classList.toggle('active', el.dataset.devEui === node.dev_eui);
+      });
+
+      // 플레이스홀더 숨기고 상세 표시
+      document.getElementById('detailPlaceholder').style.display = 'none';
+      document.getElementById('detailContent').style.display = 'flex';
+
+      // 헤더
+      document.getElementById('detailName').textContent = node.name;
+      document.getElementById('detailEui').textContent  = node.dev_eui;
+      const statusEl = document.getElementById('detailStatus');
+      statusEl.textContent  = node.is_disabled ? '비활성' : '활성';
+      statusEl.className    = 'detail-status ' + (node.is_disabled ? 'status-inactive' : 'status-active');
+
+      // 기본 정보
+      document.getElementById('infoDevEui').textContent  = node.dev_eui;
+      document.getElementById('infoJoinEui').textContent = node.join_eui || '-';
+      document.getElementById('infoApp').textContent     = node.application_name || '-';
+      document.getElementById('infoProfile').textContent = node.device_profile_name || node.device_profile_id || '-';
+      document.getElementById('infoLastSeen').textContent= node.last_seen || '-';
+      document.getElementById('infoDesc').textContent    = node.description || '-';
+
+      // 패킷 히스토리
+      loadHistory(node.dev_eui);
+    }
+
+    function loadHistory(devEui) {
+      document.getElementById('historyCount').textContent = '불러오는 중...';
+      document.getElementById('packetBody').innerHTML = `<tr><td colspan="8" class="table-empty">불러오는 중...</td></tr>`;
+      document.getElementById('loadMoreRow').style.display = 'none';
+
+      fetch(`/api/node-history/${encodeURIComponent(devEui)}`)
+        .then(r => r.json())
+        .then(data => {
+          packetStore = data.events || [];
+          packetRendered = 0;
+          document.getElementById('historyCount').textContent = `총 ${data.total}건`;
+          renderPacketPage();
         })
         .catch(e => {
-          tbody.innerHTML = `<tr><td colspan="9" style="padding:30px;text-align:center;color:#ef4444;">요청 실패: ${e}</td></tr>`;
+          document.getElementById('packetBody').innerHTML = `<tr><td colspan="8" class="table-empty">불러오기 실패: ${e}</td></tr>`;
         });
     }
 
-    function deleteNode(devEui, name) {
-      if (!confirm(`"${name}" (${devEui}) 을 삭제하시겠습니까?`)) return;
-      fetch(`/api/delete-node/${devEui}`, { method: 'DELETE' })
+    function reloadHistory() {
+      if (selectedNode) loadHistory(selectedNode.dev_eui);
+    }
+
+    function renderPacketPage() {
+      const tbody = document.getElementById('packetBody');
+      const end   = Math.min(packetRendered + PAGE_SIZE, packetStore.length);
+      const slice = packetStore.slice(packetRendered, end);
+
+      if (packetRendered === 0) {
+        if (!slice.length) {
+          tbody.innerHTML = `<tr><td colspan="8" class="table-empty">수신된 패킷이 없습니다.</td></tr>`;
+          return;
+        }
+        tbody.innerHTML = '';
+      }
+
+      slice.forEach(ev => {
+        const tr = document.createElement('tr');
+        if (ev.collision_detected) tr.className = 'collision';
+        const rssi = (ev.rssi || []).join(', ') || '-';
+        const snr  = (ev.snr  || []).map(v => (+v).toFixed(1)).join(', ') || '-';
+        const payload = esc(ev.payload_text || ev.payload_hex || '-');
+        const state = ev.collision_detected
+          ? '<span style="color:#c41e3a;font-weight:700;">충돌</span>'
+          : '<span style="color:#16a34a;">정상</span>';
+        tr.innerHTML = `
+          <td>${ev.time || '-'}</td>
+          <td>${ev.display_f_cnt ?? ev.f_cnt ?? '-'}</td>
+          <td>${ev.sf ?? '-'}</td>
+          <td>${ev.frequency_mhz ?? '-'}</td>
+          <td>${rssi}</td>
+          <td>${snr}</td>
+          <td class="payload-cell" title="${payload}">${payload}</td>
+          <td>${state}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      packetRendered = end;
+      const loadMoreRow = document.getElementById('loadMoreRow');
+      loadMoreRow.style.display = packetRendered < packetStore.length ? 'block' : 'none';
+    }
+
+    function loadMorePackets() { renderPacketPage(); }
+
+    // ══════════════════════════════════════════
+    //  상세 패널 액션 버튼
+    // ══════════════════════════════════════════
+    function clearSelected() {
+      if (!selectedNode) return;
+      const { dev_eui, name } = selectedNode;
+      if (!confirm(`"${name}" 의 수신 패킷을 모두 삭제하시겠습니까?\nFCnt 카운터는 유지됩니다.`)) return;
+      fetch(`/api/clear-node-events/${dev_eui}`, { method: 'DELETE' })
         .then(r => r.json())
         .then(res => {
-          if (res.success) refreshNodeList();
-          else alert('삭제 실패: ' + res.error);
+          if (res.success) {
+            packetStore = []; packetRendered = 0;
+            document.getElementById('packetBody').innerHTML = `<tr><td colspan="8" class="table-empty">패킷이 삭제되었습니다.</td></tr>`;
+            document.getElementById('loadMoreRow').style.display = 'none';
+            document.getElementById('historyCount').textContent = '총 0건';
+          } else alert('삭제 실패: ' + res.error);
         });
     }
 
-    // ===== 키 조회 모달 =====
+    function resetSelected() {
+      if (!selectedNode) return;
+      const { dev_eui, name } = selectedNode;
+      if (!confirm(`"${name}" 의 기록을 초기화하시겠습니까?\n패킷 삭제 + FCnt 카운터가 0으로 리셋됩니다.`)) return;
+      fetch(`/api/reset-node-history/${dev_eui}`, { method: 'POST' })
+        .then(r => r.json())
+        .then(res => {
+          if (res.success) {
+            packetStore = []; packetRendered = 0;
+            document.getElementById('packetBody').innerHTML = `<tr><td colspan="8" class="table-empty">기록이 초기화되었습니다.</td></tr>`;
+            document.getElementById('loadMoreRow').style.display = 'none';
+            document.getElementById('historyCount').textContent = '총 0건';
+          } else alert('초기화 실패: ' + res.error);
+        });
+    }
+
+    function editSelected() {
+      if (!selectedNode) return;
+      openEditModal(selectedNode);
+    }
+
+    function deleteSelected() {
+      if (!selectedNode) return;
+      const { dev_eui, name } = selectedNode;
+      if (!confirm(`"${name}" (${dev_eui}) 을 삭제하시겠습니까?`)) return;
+      fetch(`/api/delete-node/${dev_eui}`, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(res => {
+          if (res.success) {
+            selectedNode = null;
+            document.getElementById('detailPlaceholder').style.display = 'flex';
+            document.getElementById('detailContent').style.display = 'none';
+            loadNodeList();
+          } else alert('삭제 실패: ' + res.error);
+        });
+    }
+
+    function showKeysForSelected() {
+      if (!selectedNode) return;
+      openKeysModal(selectedNode.dev_eui, selectedNode.name);
+    }
+
+    // ══════════════════════════════════════════
+    //  키 조회 모달
+    // ══════════════════════════════════════════
     function openKeysModal(devEui, name) {
-      document.getElementById('keysModalTitle').textContent = `🔑 키 조회 — ${name}`;
-      document.getElementById('keysModalBody').innerHTML = '<div style="color:#94a3b8;text-align:center;padding:20px;">불러오는 중...</div>';
-      document.getElementById('keysModal').style.display = 'flex';
+      document.getElementById('keysModalTitle').textContent = `🔑 ${name}`;
+      document.getElementById('keysBody').innerHTML = '<div style="color:#94a3b8;text-align:center;padding:20px;">불러오는 중...</div>';
+      openModal('keysModal');
 
       fetch(`/api/node-keys/${devEui}`)
         .then(r => r.json())
         .then(keys => {
-          if (keys.error) {
-            document.getElementById('keysModalBody').innerHTML =
-              `<div style="color:#ef4444;font-size:13px;">오류: ${keys.error}</div>`;
-            return;
-          }
+          if (keys.error) { document.getElementById('keysBody').innerHTML = `<div style="color:#ef4444;font-size:13px;">오류: ${keys.error}</div>`; return; }
           const fields = [
-            { label: 'Device EUI (EUI64)',        value: devEui },
-            { label: 'Join EUI (EUI64)',           value: keys.join_eui },
-            { label: 'Application Key (NwkKey)',   value: keys.nwk_key },
-            { label: 'App Key (LoRaWAN 1.1)',      value: keys.app_key },
-            { label: 'Gen App Key',                value: keys.gen_app_key },
+            { label: 'Device EUI (EUI64)',      value: devEui },
+            { label: 'Join EUI (EUI64)',         value: keys.join_eui },
+            { label: 'Application Key (NwkKey)', value: keys.nwk_key },
+            { label: 'App Key (LoRaWAN 1.1)',    value: keys.app_key },
+            { label: 'Gen App Key',              value: keys.gen_app_key },
           ];
-          document.getElementById('keysModalBody').innerHTML = fields.map((f, i) => `
-            <div>
-              <div style="font-size:11px;font-weight:600;color:#64748b;margin-bottom:4px;">${f.label}</div>
-              <div style="display:flex;gap:8px;align-items:center;">
-                <code id="keyField${i}" style="font-size:13px;font-weight:700;color:#1e293b;flex:1;word-break:break-all;background:#f8fafc;padding:6px 8px;border-radius:4px;border:1px solid #e2e8f0;">${f.value || '-'}</code>
-                ${f.value ? `<button onclick="copyKeyField('keyField${i}')" style="padding:4px 10px;background:#f1f5f9;border:1.5px solid #cbd5e1;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap;">복사</button>` : ''}
-              </div>
+          document.getElementById('keysBody').innerHTML = fields.map((f, i) => `
+            <div class="key-item">
+              <span class="key-label">${f.label}</span>
+              <span class="key-val" id="kf${i}">${f.value || '-'}</span>
+              ${f.value ? `<button class="copy-btn" onclick="copyEl('kf${i}')">복사</button>` : ''}
             </div>
           `).join('');
         });
     }
 
-    function copyKeyField(elId) {
-      const text = document.getElementById(elId).textContent;
-      navigator.clipboard.writeText(text).then(() => {
-        const btn = document.getElementById(elId).nextElementSibling;
-        if (btn) { btn.textContent = '완료!'; setTimeout(() => btn.textContent = '복사', 1500); }
-      });
-    }
-
-    // ===== 편집 모달 =====
+    // ══════════════════════════════════════════
+    //  편집 모달
+    // ══════════════════════════════════════════
     function openEditModal(node) {
-      document.getElementById('editDevEui').value      = node.dev_eui;
-      document.getElementById('editDevEuiShow').value  = node.dev_eui;
-      document.getElementById('editAppId').value       = node.application_id;
-      document.getElementById('editJoinEui').value     = node.join_eui || '';
-      document.getElementById('editName').value        = node.name;
-      document.getElementById('editDesc').value        = node.description || '';
+      document.getElementById('editDevEui').value     = node.dev_eui;
+      document.getElementById('editDevEuiShow').value = node.dev_eui;
+      document.getElementById('editAppId').value      = node.application_id;
+      document.getElementById('editJoinEui').value    = node.join_eui || '';
+      document.getElementById('editName').value       = node.name;
+      document.getElementById('editDesc').value       = node.description || '';
       setMsg('editMsg', '', '');
 
       fetch('/api/device-profiles').then(r => r.json()).then(profiles => {
-        const sel = document.getElementById('editProfile');
-        sel.innerHTML = profiles.map(p =>
+        document.getElementById('editProfile').innerHTML = profiles.map(p =>
           `<option value="${p.id}" ${p.id === node.device_profile_id ? 'selected' : ''}>${p.name}</option>`
         ).join('');
       });
-      document.getElementById('editModal').style.display = 'flex';
+      openModal('editModal');
     }
 
-    function closeEditModal() {
-      document.getElementById('editModal').style.display = 'none';
-    }
+    function closeEditModal() { closeModal('editModal'); }
 
     function submitEdit() {
       const devEui    = document.getElementById('editDevEui').value;
@@ -398,19 +789,25 @@
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ dev_eui: devEui, join_eui: joinEui || null, name, description: desc, application_id: appId, device_profile_id: profileId })
-      })
-      .then(r => r.json())
-      .then(res => {
+      }).then(r => r.json()).then(res => {
         if (res.success) {
           setMsg('editMsg', 'ok', '저장 완료!');
-          setTimeout(() => { closeEditModal(); refreshNodeList(); }, 1000);
+          // 선택된 노드 정보 갱신
+          if (selectedNode && selectedNode.dev_eui === devEui) {
+            selectedNode = { ...selectedNode, name, description: desc };
+            document.getElementById('detailName').textContent = name;
+            document.getElementById('infoDesc').textContent   = desc || '-';
+          }
+          setTimeout(() => { closeEditModal(); loadNodeList(); }, 900);
         } else {
           setMsg('editMsg', 'err', '오류: ' + res.error);
         }
       });
     }
 
-    // ===== 등록 모달 =====
+    // ══════════════════════════════════════════
+    //  등록 모달
+    // ══════════════════════════════════════════
     function generateHex(bytes) {
       const arr = new Uint8Array(bytes);
       crypto.getRandomValues(arr);
@@ -418,67 +815,57 @@
     }
 
     function regenerateCredentials() {
-      document.getElementById('regDevEui').value    = generateHex(8);   // 8바이트 = 16자리
-      document.getElementById('regJoinEui').value   = generateHex(8);   // 8바이트 = 16자리
-      document.getElementById('regAppKey').value    = generateHex(16);  // 16바이트 = 32자리
-      document.getElementById('regGenAppKey').value = generateHex(16);  // 16바이트 = 32자리
+      document.getElementById('regDevEui').value    = generateHex(8);
+      document.getElementById('regJoinEui').value   = generateHex(8);
+      document.getElementById('regAppKey').value    = generateHex(16);
+      document.getElementById('regGenAppKey').value = generateHex(16);
     }
 
     function openRegisterModal() {
-      document.getElementById('registerModal').style.display = 'flex';
-      document.getElementById('registerForm').style.display = 'block';
+      document.getElementById('registerForm').style.display   = 'block';
       document.getElementById('registerResult').style.display = 'none';
       setMsg('registerMsg', '', '');
       document.getElementById('regName').value = '';
       document.getElementById('regDesc').value = '';
-      regenerateCredentials();  // 4개 크리덴셜 자동 생성
-
+      regenerateCredentials();
       fetch('/api/applications').then(r => r.json()).then(apps => {
-        document.getElementById('regApp').innerHTML =
-          apps.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
+        document.getElementById('regApp').innerHTML = apps.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
       });
       fetch('/api/device-profiles').then(r => r.json()).then(profiles => {
-        document.getElementById('regProfile').innerHTML =
-          profiles.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+        document.getElementById('regProfile').innerHTML = profiles.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
       });
+      openModal('registerModal');
     }
 
     function closeRegisterModal() {
-      document.getElementById('registerModal').style.display = 'none';
-      refreshNodeList();
+      closeModal('registerModal');
+      loadNodeList();
     }
 
     function submitRegister() {
-      const devEui     = document.getElementById('regDevEui').value;
-      const joinEui    = document.getElementById('regJoinEui').value;
-      const appKey     = document.getElementById('regAppKey').value;
-      const genAppKey  = document.getElementById('regGenAppKey').value;
-      const name       = document.getElementById('regName').value.trim();
-      const desc       = document.getElementById('regDesc').value.trim();
-      const appId      = document.getElementById('regApp').value;
-      const profileId  = document.getElementById('regProfile').value;
+      const devEui    = document.getElementById('regDevEui').value;
+      const joinEui   = document.getElementById('regJoinEui').value;
+      const appKey    = document.getElementById('regAppKey').value;
+      const genAppKey = document.getElementById('regGenAppKey').value;
+      const name      = document.getElementById('regName').value.trim();
+      const desc      = document.getElementById('regDesc').value.trim();
+      const appId     = document.getElementById('regApp').value;
+      const profileId = document.getElementById('regProfile').value;
 
       if (!name) { setMsg('registerMsg', 'err', '이름을 입력하세요.'); return; }
 
       fetch('/api/register-node', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          dev_eui: devEui, join_eui: joinEui,
-          app_key: appKey, gen_app_key: genAppKey,
-          name, description: desc,
-          application_id: appId, device_profile_id: profileId,
-        })
-      })
-      .then(r => r.json())
-      .then(res => {
+        body: JSON.stringify({ dev_eui: devEui, join_eui: joinEui, app_key: appKey, gen_app_key: genAppKey, name, description: desc, application_id: appId, device_profile_id: profileId })
+      }).then(r => r.json()).then(res => {
         if (res.success) {
-          document.getElementById('registerForm').style.display = 'none';
-          document.getElementById('resultDevEui').textContent    = devEui;
-          document.getElementById('resultJoinEui').textContent   = joinEui;
-          document.getElementById('resultAppKey').textContent    = appKey;
-          document.getElementById('resultGenAppKey').textContent = genAppKey;
-          document.getElementById('resultName').textContent      = name;
+          document.getElementById('registerForm').style.display   = 'none';
+          document.getElementById('resultDevEui').textContent     = devEui;
+          document.getElementById('resultJoinEui').textContent    = joinEui;
+          document.getElementById('resultAppKey').textContent     = appKey;
+          document.getElementById('resultGenAppKey').textContent  = genAppKey;
+          document.getElementById('resultName').textContent       = name;
           document.getElementById('registerResult').style.display = 'block';
         } else {
           setMsg('registerMsg', 'err', '오류: ' + res.error);
@@ -486,16 +873,36 @@
       });
     }
 
-    function copyText(elId) {
-      const text = document.getElementById(elId).textContent;
+    // ══════════════════════════════════════════
+    //  예시 코드 모달
+    // ══════════════════════════════════════════
+    function openSampleModal() {
+      switchCodeTab('curl');
+      openModal('sampleModal');
+    }
+
+    function switchCodeTab(type) {
+      codeTabType = type;
+      document.querySelectorAll('[data-tab]').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === type));
+      const host   = `${window.location.hostname}:${window.location.port || 5000}`;
+      const devEui = selectedNode ? selectedNode.dev_eui : 'YOUR_DEV_EUI';
+      document.getElementById('codeBlock').textContent = codeTemplates[type](host, devEui);
+    }
+
+    function copyCode() {
+      const text = document.getElementById('codeBlock').textContent;
       navigator.clipboard.writeText(text).then(() => {
-        const btn = document.querySelector(`#${elId} + button`) ||
-                    document.getElementById(elId).nextElementSibling;
-        if (btn) { btn.textContent = '완료!'; setTimeout(() => btn.textContent = '복사', 1500); }
+        const btn = document.querySelector('.code-copy');
+        btn.textContent = '복사됨'; setTimeout(() => btn.textContent = '복사', 1500);
       });
     }
 
-    // ===== 공통 유틸 =====
+    // ══════════════════════════════════════════
+    //  공통 유틸
+    // ══════════════════════════════════════════
+    function openModal(id)  { document.getElementById(id).style.display = 'flex'; }
+    function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+
     function setMsg(id, type, text) {
       const el = document.getElementById(id);
       el.className = 'msg-box' + (type === 'ok' ? ' msg-ok' : type === 'err' ? ' msg-err' : '');
@@ -503,15 +910,27 @@
       el.textContent = text;
     }
 
+    function copyEl(id) {
+      const text = document.getElementById(id).textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById(id).nextElementSibling;
+        if (btn) { btn.textContent = '완료!'; setTimeout(() => btn.textContent = '복사', 1500); }
+      });
+    }
+
+    function esc(str) {
+      return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
     // 모달 외부 클릭 닫기
-    ['registerModal','editModal'].forEach(id => {
+    ['registerModal','editModal','keysModal','sampleModal'].forEach(id => {
       document.getElementById(id).addEventListener('click', e => {
-        if (e.target.id === id) document.getElementById(id).style.display = 'none';
+        if (e.target.id === id) closeModal(id);
       });
     });
 
     // 초기 로드
-    refreshNodeList();
+    loadNodeList();
   </script>
 </body>
 </html>

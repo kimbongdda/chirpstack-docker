@@ -1,112 +1,96 @@
-# ChirpStack Docker Example
+# ChirpStack Docker example
 
-[한국어 문서](README.ko.md)
+This repository contains a skeleton to setup the [ChirpStack](https://www.chirpstack.io)
+open-source LoRaWAN Network Server (v4) using [Docker Compose](https://docs.docker.com/compose/).
 
-This repository contains a skeleton to set up the
-[ChirpStack](https://www.chirpstack.io) open-source LoRaWAN Network Server (v4)
-using [Docker Compose](https://docs.docker.com/compose/).
+**Note:** Please use this `docker-compose.yml` file as a starting point for testing
+but keep in mind that for production usage it might need modifications. 
 
-This repository also includes a custom Flask dashboard service under
-[`dashboard`](dashboard).
+## Directory layout
 
-**Note:** Please use this `docker-compose.yml` file as a starting point for
-testing, but keep in mind that production usage may require additional changes.
-
-## Directory Layout
-
-* `docker-compose.yml`: Docker Compose file containing the services
-* `configuration/chirpstack`: ChirpStack configuration files
-* `configuration/chirpstack-gateway-bridge`: ChirpStack Gateway Bridge configuration files
-* `configuration/mosquitto`: Mosquitto (MQTT broker) configuration files
-* `configuration/postgresql/initdb`: PostgreSQL initialization scripts
-* `dashboard`: Flask-based LoRa dashboard code
-
-## Packaging Workflows
-
-If you want ready-made packaging and migration scripts, see:
-
-* [docs/package-workflows.md](docs/package-workflows.md)
-* [docs/package-workflows.ko.md](docs/package-workflows.ko.md)
+* `docker-compose.yml`: the docker-compose file containing the services
+* `configuration/chirpstack`: directory containing the ChirpStack configuration files
+* `configuration/chirpstack-gateway-bridge`: directory containing the ChirpStack Gateway Bridge configuration
+* `configuration/mosquitto`: directory containing the Mosquitto (MQTT broker) configuration
+* `configuration/postgresql/initdb/`: directory containing PostgreSQL initialization scripts
 
 ## Configuration
 
-This setup is pre-configured for all regions. You can either connect a
-ChirpStack Gateway Bridge instance (v3.14.0+) to the MQTT broker (port 1883) or
-connect a Semtech UDP Packet Forwarder.
-
-Please note:
+This setup is pre-configured for all regions. You can either connect a ChirpStack Gateway Bridge
+instance (v3.14.0+) to the MQTT broker (port 1883) or connect a Semtech UDP Packet Forwarder.
+Please note that:
 
 * You must prefix the MQTT topic with the region.
-* See the region configuration files in `configuration/chirpstack` for topic
-  prefixes such as `eu868`, `us915_0`, `au915_0`, and `as923_2`.
+  Please see the region configuration files in the `configuration/chirpstack` for a list
+  of topic prefixes (e.g. eu868, us915_0, au915_0, as923_2, ...).
 * The protobuf marshaler is configured.
 
-This setup also includes two ChirpStack Gateway Bridge instances:
+This setup also comes with two instances of the ChirpStack Gateway Bridge. One
+is configured to handle the Semtech UDP Packet Forwarder data (port 1700), the
+other is configured to handle the Basics Station protocol (port 3001). Both
+instances are by default configured for EU868 (using the `eu868` MQTT topic
+prefix).
 
-* One for the Semtech UDP Packet Forwarder protocol on port `1700`
-* One for the Basics Station protocol on port `3001`
+### Reconfigure regions
 
-By default, both use the `eu868` MQTT topic prefix.
-
-### Reconfigure Regions
-
-ChirpStack has at least one configuration of each region enabled. The
-`enabled_regions` list is defined in `configuration/chirpstack/chirpstack.toml`.
-Each entry refers to the `id` found in the corresponding `region_XXX.toml`
-file. That file also defines the `topic_prefix`.
+ChirpStack has at least one configuration of each region enabled. You will find
+the list of `enabled_regions` in `configuration/chirpstack/chirpstack.toml`.
+Each entry in `enabled_regions` refers to the `id` that can be found in the
+`region_XXX.toml` file. This `region_XXX.toml` also contains a `topic_prefix`
+configuration which you need to configure the ChirpStack Gateway Bridge
+UDP instance (see below).
 
 #### ChirpStack Gateway Bridge (UDP)
 
-Within `docker-compose.yml`, replace the `eu868` prefix in the
-`INTEGRATION__..._TOPIC_TEMPLATE` values with the MQTT `topic_prefix` of the
-region you want to use.
+Within the `docker-compose.yml` file, you must replace the `eu868` prefix in the
+`INTEGRATION__..._TOPIC_TEMPLATE` configuration with the MQTT `topic_prefix` of
+the region you would like to use (e.g. `us915_0`, `au915_0`, `in865`, ...).
 
 #### ChirpStack Gateway Bridge (Basics Station)
 
-Within `docker-compose.yml`, update the configuration file used by the
-Basics Station bridge service. The default is
-`chirpstack-gateway-bridge-basicstation-eu868.toml`.
+Within the `docker-compose.yml` file, you must update the configuration file
+that the ChirpStack Gateway Bridge instance must used. The default is
+`chirpstack-gateway-bridge-basicstation-eu868.toml`. For available
+configuration files, please see the `configuration/chirpstack-gateway-bridge`
+directory.
 
-## Data Persistence
+# Data persistence
 
-PostgreSQL and Redis data are persisted in Docker named volumes defined in
-`docker-compose.yml`. The custom dashboard also stores its SQLite history data
-in a Docker volume.
+PostgreSQL and Redis data is persisted in Docker volumes, see the `docker-compose.yml`
+`volumes` definition.
 
 ## Requirements
 
-Before using this project, make sure
-[Docker](https://www.docker.com/community-edition) is installed.
+Before using this `docker-compose.yml` file, make sure you have [Docker](https://www.docker.com/community-edition)
+installed.
 
-## Importing Device Repository
+## Importing device repository
 
-To import the optional
-[chirpstack-device-profiles](https://github.com/chirpstack/chirpstack-device-profiles)
-repository, run:
+To import the [chirpstack-device-profiles](https://github.com/chirpstack/chirpstack-device-profiles)
+repository (optional step), run the following command:
 
 ```bash
 make import-device-profiles
 ```
 
-This clones the repository and executes the ChirpStack import command. You need
-the `make` command installed for this step.
+This will clone the `chirpstack-device-profiles` repository and execute the import command of ChirpStack.
+Please note that for this step you need to have the `make` command installed.
 
 ## Usage
 
-To start the stack:
+To start the ChirpStack simply run:
 
 ```bash
-docker compose up --build -d
+$ docker compose up
 ```
 
-After all components are initialized, you should be able to access:
+After all the components have been initialized and started, you should be able
+to open http://localhost:8080/ in your browser.
 
-* ChirpStack UI: `http://localhost:8080`
-* ChirpStack REST API: `http://localhost:8090`
-* Dashboard: `http://localhost:5000`
+##
 
-**Note:** The project includes the
-[ChirpStack REST API](https://github.com/chirpstack/chirpstack-rest-api), but
-the [gRPC interface](https://www.chirpstack.io/docs/chirpstack/api/grpc.html)
-is generally recommended over the
-[REST interface](https://www.chirpstack.io/docs/chirpstack/api/rest.html).
+The example includes the [ChirpStack REST API](https://github.com/chirpstack/chirpstack-rest-api).
+You should be able to access the UI by opening http://localhost:8090 in your browser.
+
+**Note:** It is recommended to use the [gRPC](https://www.chirpstack.io/docs/chirpstack/api/grpc.html)
+interface over the [REST](https://www.chirpstack.io/docs/chirpstack/api/rest.html) interface.

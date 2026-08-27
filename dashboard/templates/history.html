@@ -129,6 +129,7 @@
         <label>&nbsp;</label>
         <div style="display:flex;gap:8px;">
           <button class="btn btn-primary" onclick="applyFilter()">검색</button>
+          <button class="btn btn-reset" onclick="deleteFilteredHistory()">선택 기록 삭제</button>
           <button class="btn btn-reset" onclick="resetFilter()">초기화</button>
         </div>
       </div>
@@ -268,14 +269,18 @@
               <td style="white-space:nowrap;font-size:12px;">${ev.time}</td>
               <td style="font-weight:600;">${ev.dev_name || '-'}<br><span style="font-family:monospace;font-size:11px;color:#94a3b8;">${ev.dev_eui || ''}</span></td>
               <td style="font-family:monospace;font-size:12px;">${ev.dev_addr || '-'}</td>
-              <td style="text-align:center;">${ev.f_cnt ?? '-'}</td>
+              <td style="text-align:center;">${ev.display_f_cnt ?? ev.f_cnt ?? '-'}</td>
               <td style="text-align:center;">${ev.frequency_mhz ? ev.frequency_mhz + ' MHz' : '-'}</td>
               <td style="text-align:center;">${ev.sf ? 'SF' + ev.sf : '-'}</td>
               <td style="text-align:center;">${rssi} dBm</td>
               <td style="text-align:center;">${snr} dB</td>
               <td style="text-align:center;">${gws}개</td>
               <td style="font-family:monospace;font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${ev.payload_hex || ''}">${ev.payload_hex || '-'}</td>
-              <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;" title="${ev.payload_text || ''}">${ev.payload_text || '-'}</td>
+              <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;" title="${ev.decoded_object ? JSON.stringify(ev.decoded_object) : (ev.payload_text || '')}">${
+                ev.decoded_object && typeof ev.decoded_object === 'object'
+                  ? Object.entries(ev.decoded_object).map(([k,v]) => `<b>${k}</b>: ${v}`).join(' | ')
+                  : (ev.payload_text || '-')
+              }</td>
               <td>${ev.collision_detected
                 ? `<span class="badge-collision" title="${reasons}">충돌</span>`
                 : '<span class="badge-ok">정상</span>'}</td>
@@ -313,6 +318,26 @@
       document.getElementById('filterDevice').value = '';
       currentPage = 1;
       loadHistory();
+    }
+
+    function deleteFilteredHistory() {
+      const devEui = document.getElementById('filterDevice').value;
+      if (!devEui) {
+        alert('먼저 디바이스를 선택하세요.');
+        return;
+      }
+      if (!confirm(`선택한 디바이스(${devEui})의 기록을 모두 삭제하시겠습니까?\n삭제 후 해당 노드의 프레임카운터 표시는 0부터 다시 시작합니다.`)) return;
+
+      fetch(`/api/reset-node-history/${devEui}`, { method: 'POST' })
+        .then(r => r.json())
+        .then(res => {
+          if (res.success) {
+            currentPage = 1;
+            loadHistory();
+          } else {
+            alert('삭제 실패: ' + res.error);
+          }
+        });
     }
 
     // 초기 로드

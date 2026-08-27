@@ -27,6 +27,16 @@ DB_PATH = os.getenv("DB_PATH", "/app/data/lora_history.db")
 
 _db_lock = threading.Lock()
 
+
+def _normalize_fcnt(dev_eui, fcnt, state_map=None):
+    if not isinstance(fcnt, int):
+        return fcnt
+
+    base = 0
+    if state_map is not None and dev_eui in state_map:
+        base = state_map[dev_eui]
+    return fcnt - base
+
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -60,28 +70,98 @@ def init_db():
                 topic         TEXT
             )
         """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_time    ON uplink_events(time)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_dev_eui ON uplink_events(dev_eui)")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS node_history_state (
+                dev_eui    TEXT PRIMARY KEY,
+                fcnt_base  INTEGER,
+                reset_at   TEXT
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_time       ON uplink_events(time)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_dev_eui    ON uplink_events(dev_eui)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_collision   ON uplink_events(collision_detected)")
+        # 기존 DB에 decoded_object 컬럼이 없으면 추가 (마이그레이션)
+        try:
+            conn.execute("ALTER TABLE uplink_events ADD COLUMN decoded_object TEXT")
+        except Exception:
+            pass
         conn.commit()
     print(f"[DB] 초기화 완료: {DB_PATH}")
+
+
+def _get_fcnt_state_map(conn=None):
+    close_conn = False
+    if conn is None:
+        conn = get_db()
+        close_conn = True
+
+    try:
+        rows = conn.execute("SELECT dev_eui, fcnt_base FROM node_history_state").fetchall()
+        return {
+            row["dev_eui"]: row["fcnt_base"]
+            for row in rows
+            if row["fcnt_base"] is not None
+        }
+    finally:
+        if close_conn:
+            conn.close()
+
+
+def _set_node_history_reset(dev_eui):
+    with _db_lock:
+        with get_db() as conn:
+            conn.execute(
+                """INSERT INTO node_history_state (dev_eui, fcnt_base, reset_at)
+                   VALUES (?, NULL, ?)
+                   ON CONFLICT(dev_eui) DO UPDATE SET
+                       fcnt_base = NULL,
+                       reset_at = excluded.reset_at""",
+                (dev_eui, datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")),
+            )
+            conn.execute("DELETE FROM uplink_events WHERE dev_eui = ?", (dev_eui,))
+            conn.commit()
 
 def save_event_db(event: dict):
     with _db_lock:
         with get_db() as conn:
+            state_row = conn.execute(
+                "SELECT fcnt_base FROM node_history_state WHERE dev_eui = ?",
+                (event.get("dev_eui"),),
+            ).fetchone()
+            fcnt_base = state_row[0] if state_row else None
+            raw_fcnt = event.get("raw_f_cnt")
+            if isinstance(raw_fcnt, int):
+                # fcnt_base 미설정이거나, raw_fcnt < base이면 디바이스 리셋으로 판단해 base 갱신
+                if fcnt_base is None or raw_fcnt < fcnt_base:
+                    conn.execute(
+                        """INSERT INTO node_history_state (dev_eui, fcnt_base, reset_at)
+                           VALUES (?, ?, ?)
+                           ON CONFLICT(dev_eui) DO UPDATE SET
+                               fcnt_base = excluded.fcnt_base,
+                               reset_at  = excluded.reset_at""",
+                        (
+                            event.get("dev_eui"),
+                            raw_fcnt,
+                            datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
+                        ),
+                    )
+                    fcnt_base = raw_fcnt
+            display_f_cnt = raw_fcnt - fcnt_base if isinstance(raw_fcnt, int) and isinstance(fcnt_base, int) else raw_fcnt
             conn.execute("""
                 INSERT INTO uplink_events
                     (time, dev_eui, dev_name, dev_addr, f_cnt,
                      frequency_mhz, sf, bandwidth, code_rate, dr,
                      rssi, snr, gateways, payload_hex, payload_text,
+                     decoded_object,
                      collision_detected, collision_reasons,
                      crc_ok_count, total_gateways, topic)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 event.get("time"),
                 event.get("dev_eui"),
                 event.get("dev_name"),
                 event.get("dev_addr"),
-                event.get("f_cnt"),
+                display_f_cnt,
                 event.get("frequency_mhz"),
                 event.get("sf"),
                 event.get("bandwidth"),
@@ -92,6 +172,7 @@ def save_event_db(event: dict):
                 json.dumps(event.get("gateways") or []),
                 event.get("payload_hex"),
                 event.get("payload_text"),
+                event.get("decoded_object"),
                 1 if event.get("collision_detected") else 0,
                 json.dumps(event.get("collision_reasons") or []),
                 event.get("crc_ok_count"),
@@ -143,13 +224,19 @@ missed_frames = defaultdict(int)
 # deduplicationId 추적 (최근 본 ID들)
 seen_dedup_ids = deque(maxlen=1000)
 
-# fCnt별로 여러 게이트웨이에서 수신한 기록 (fCnt 중복)
-fcnt_gateway_map = defaultdict(lambda: defaultdict(list))
+# fCnt별로 여러 게이트웨이에서 수신한 기록 (최근 500개 키만 유지)
+_FCNT_MAP_MAXSIZE = 500
+fcnt_gateway_map = {}
+fcnt_gateway_map_keys = deque(maxlen=_FCNT_MAP_MAXSIZE)
 
 # ChirpStack에서 조회한 게이트웨이 목록 캐시 {gateway_id: {...}}
 chirpstack_gateways = {}
 
 app = Flask(__name__)
+
+# /api/summary 캐시 (무거운 집계를 30초 동안 재사용)
+_summary_cache = {"data": None, "at": 0}
+_SUMMARY_CACHE_TTL = 30  # 초
 
 
 # ===================== ChirpStack 게이트웨이 목록 조회 =====================
@@ -281,6 +368,10 @@ def parse_event(msg_topic: str, payload: bytes):
         except Exception:
             pass
 
+    # ChirpStack 코덱이 디코딩한 센서값 (object 필드)
+    obj = data.get("object")
+    decoded_object = json.dumps(obj, ensure_ascii=False) if obj else None
+
     # rxInfo 배열 안에 gatewayId, rssi, snr, location 정보들
     rx_infos = data.get("rxInfo", []) or []
     gateways = [rx.get("gatewayId") for rx in rx_infos if rx.get("gatewayId")]
@@ -319,11 +410,13 @@ def parse_event(msg_topic: str, payload: bytes):
         "dev_name": dev_name,
         "dev_addr": dev_addr,
         "f_cnt": fcnt,
+        "raw_f_cnt": fcnt,
         "gateways": gateways,
         "rssi": rssis,
         "snr": snrs,
         "payload_hex": payload_hex,
         "payload_text": payload_text,
+        "decoded_object": decoded_object,
         "frequency_hz": frequency_hz,
         "frequency_mhz": frequency_mhz,
         "sf": sf,
@@ -392,19 +485,31 @@ def on_message(client, userdata, msg):
     if isinstance(fcnt, int) and dev_eui:
         gateway_key = f"{dev_eui}_{fcnt}"
         gateways = event.get("gateways", [])
-        
+
+        if gateway_key not in fcnt_gateway_map:
+            # 크기 초과 시 가장 오래된 키 제거
+            if len(fcnt_gateway_map_keys) == _FCNT_MAP_MAXSIZE:
+                oldest = fcnt_gateway_map_keys[0]
+                fcnt_gateway_map.pop(oldest, None)
+            fcnt_gateway_map[gateway_key] = defaultdict(list)
+            fcnt_gateway_map_keys.append(gateway_key)
+
+        now_ts = datetime.now(KST)
+        _MULTI_GW_WINDOW = 30  # 초: 이 시간 안에 같은 FCnt가 또 오면 충돌
+
         for gw in gateways:
             fcnt_gateway_map[gateway_key][gw].append({
-                "time": event["time"],
+                "ts": now_ts,
                 "rssi": event.get("rssi", [None])[0],
                 "snr": event.get("snr", [None])[0]
             })
-        
-        # 같은 fCnt, 같은 게이트웨이에서 여러 번 수신 = 충돌 가능성
+
+        # 30초 이내 같은 FCnt를 같은 게이트웨이에서 여러 번 수신 = 충돌
         for gw, records in fcnt_gateway_map[gateway_key].items():
-            if len(records) > 1:
+            recent = [r for r in records if (now_ts - r["ts"]).total_seconds() <= _MULTI_GW_WINDOW]
+            if len(recent) > 1:
                 collision_detected = True
-                collision_reasons.append(f"multi_gw_{len(records)}x")
+                collision_reasons.append(f"multi_gw_{len(recent)}x")
     
     # 4. CRC 에러 감지 (신호 문제)
     crc_ok_count = event.get("crc_ok_count", 0)
@@ -424,6 +529,22 @@ def on_message(client, userdata, msg):
     event["collision_detected"] = collision_detected
     event["collision_reasons"] = collision_reasons
 
+    if isinstance(fcnt, int):
+        with _db_lock:
+            with get_db() as conn:
+                state_row = conn.execute(
+                    "SELECT fcnt_base FROM node_history_state WHERE dev_eui = ?",
+                    (dev_eui,),
+                ).fetchone()
+                fcnt_base_val = state_row[0] if (state_row and state_row[0] is not None) else None
+                if fcnt_base_val is None or fcnt < fcnt_base_val:
+                    # 미설정이거나 디바이스 리셋 → 0부터 표시
+                    event["display_f_cnt"] = 0
+                else:
+                    event["display_f_cnt"] = fcnt - fcnt_base_val
+    else:
+        event["display_f_cnt"] = fcnt
+
     events.appendleft(event)  # 최신 것을 앞쪽에
     threading.Thread(target=save_event_db, args=(event,), daemon=True).start()
 
@@ -431,13 +552,14 @@ def on_message(client, userdata, msg):
     if collision_reasons:
         collision_str += f" ({', '.join(collision_reasons)})"
     
+    decoded_str = event.get("decoded_object") or event.get("payload_hex") or ""
     print(
         f"[UP] {event['time']} {event['dev_name']}({event['dev_eui']}) "
         f"DevAddr={event['dev_addr']} SF={event['sf']} "
         f"Freq={event['frequency_mhz']}MHz SNR={event['snr']} RSSI={event['rssi']} "
-        f"FCnt={event['f_cnt']} Missed={missed_frames.get(dev_eui, 0)} "
+        f"FCnt={event['display_f_cnt']} Missed={missed_frames.get(dev_eui, 0)} "
         f"{collision_str} "
-        f"PAYLOAD={event['payload_hex']}"
+        f"DATA={decoded_str}"
     )
 
     # ACK 다운링크 전송
@@ -502,13 +624,17 @@ def _rows_to_events(rows):
     """DB Row 목록을 이벤트 dict 목록으로 변환"""
     result = []
     for r in rows:
+        # f_cnt 컬럼은 save_event_db에서 이미 (raw - base)로 저장됨 — 재정규화 금지
+        display_f_cnt = r["f_cnt"]
         result.append({
+            "id":                 r["id"],
             "time":               r["time"],
             "topic":              r["topic"],
             "dev_eui":            r["dev_eui"],
             "dev_name":           r["dev_name"],
             "dev_addr":           r["dev_addr"],
-            "f_cnt":              r["f_cnt"],
+            "f_cnt":              display_f_cnt,
+            "raw_f_cnt":          display_f_cnt,
             "frequency_mhz":      r["frequency_mhz"],
             "sf":                 r["sf"],
             "bandwidth":          r["bandwidth"],
@@ -519,6 +645,7 @@ def _rows_to_events(rows):
             "gateways":           json.loads(r["gateways"] or "[]"),
             "payload_hex":        r["payload_hex"],
             "payload_text":       r["payload_text"],
+            "decoded_object":     json.loads(r["decoded_object"]) if r["decoded_object"] else None,
             "collision_detected": bool(r["collision_detected"]),
             "collision_reasons":  json.loads(r["collision_reasons"] or "[]"),
             "crc_ok_count":       r["crc_ok_count"],
@@ -529,12 +656,28 @@ def _rows_to_events(rows):
 
 @app.route("/api/events")
 def api_events():
-    # DB에서 전체 반환 (제한 없음)
+    from flask import request as flask_request
+
+    # 기본은 최신 20건, since_id가 있으면 그 이후의 신규 이벤트만 반환
+    since_id = flask_request.args.get("since_id", type=int)
+    limit = flask_request.args.get("limit", default=20, type=int)
+
     with get_db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM uplink_events ORDER BY id DESC"
-        ).fetchall()
-    return jsonify(_rows_to_events(rows))
+        if since_id is None:
+            rows = conn.execute(
+                "SELECT * FROM uplink_events ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM uplink_events WHERE id > ? ORDER BY id ASC LIMIT ?",
+                (since_id, limit),
+            ).fetchall()
+
+    return jsonify({
+        "since_id": since_id,
+        "events": _rows_to_events(rows),
+    })
 
 
 @app.route("/api/collisions")
@@ -552,6 +695,7 @@ def api_collisions():
     collisions = []
     collision_by_reason = defaultdict(int)
     collision_by_device = defaultdict(int)
+    state_map = _get_fcnt_state_map()
 
     for r in rows:
         reasons = json.loads(r["collision_reasons"] or "[]")
@@ -560,6 +704,7 @@ def api_collisions():
             "dev_eui":        r["dev_eui"],
             "dev_name":       r["dev_name"],
             "f_cnt":          r["f_cnt"],
+            "raw_f_cnt":      r["f_cnt"],
             "reasons":        reasons,
             "gateways":       json.loads(r["gateways"] or "[]"),
             "rssi":           json.loads(r["rssi"] or "[]"),
@@ -584,15 +729,25 @@ def api_collisions():
 
 @app.route("/api/summary")
 def api_summary():
+    import time as _time
+    # 캐시가 유효하면 즉시 반환
+    now = _time.monotonic()
+    if _summary_cache["data"] is not None and now - _summary_cache["at"] < _SUMMARY_CACHE_TTL:
+        return jsonify(_summary_cache["data"])
+
     # 전체 요약 + 그래프용 데이터 — DB 전체 기준
     with get_db() as conn:
         # 총 이벤트 / 디바이스 / 충돌 수
         total_events  = conn.execute("SELECT COUNT(*) FROM uplink_events").fetchone()[0]
         active_devices = conn.execute("SELECT COUNT(DISTINCT dev_eui) FROM uplink_events WHERE dev_eui IS NOT NULL").fetchone()[0]
 
-        # 평균 SNR / RSSI (JSON 배열 저장이라 Python에서 집계)
-        snr_rows  = conn.execute("SELECT snr  FROM uplink_events WHERE snr  != '[]'").fetchall()
-        rssi_rows = conn.execute("SELECT rssi FROM uplink_events WHERE rssi != '[]'").fetchall()
+        # 평균 SNR / RSSI — 최근 2000건만 샘플링 (전체 스캔 방지)
+        snr_rows  = conn.execute(
+            "SELECT snr  FROM uplink_events WHERE snr  != '[]' ORDER BY id DESC LIMIT 2000"
+        ).fetchall()
+        rssi_rows = conn.execute(
+            "SELECT rssi FROM uplink_events WHERE rssi != '[]' ORDER BY id DESC LIMIT 2000"
+        ).fetchall()
 
         all_snrs, all_rssis = [], []
         for r in snr_rows:
@@ -643,7 +798,7 @@ def api_summary():
         gw_set = set(gw for ev in events_list for gw in (ev.get("gateways") or []))
         gw_count = len(gw_set)
 
-    return jsonify({
+    result = {
         "total_events": total_events,
         "active_devices": active_devices,
         "active_gateways": gw_count,
@@ -662,7 +817,10 @@ def api_summary():
             "freqs": freqs_sorted,
             "counts": freq_counts_list,
         },
-    })
+    }
+    _summary_cache["data"] = result
+    _summary_cache["at"] = _time.monotonic()
+    return jsonify(result)
 
 
 @app.route("/api/nodes")
@@ -781,6 +939,7 @@ def api_history():
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
     with get_db() as conn:
+        state_map = _get_fcnt_state_map(conn)
         total = conn.execute(
             f"SELECT COUNT(*) FROM uplink_events {where_sql}", params
         ).fetchone()[0]
@@ -800,6 +959,7 @@ def api_history():
             "dev_name":         r["dev_name"],
             "dev_addr":         r["dev_addr"],
             "f_cnt":            r["f_cnt"],
+            "raw_f_cnt":        r["f_cnt"],
             "frequency_mhz":    r["frequency_mhz"],
             "sf":               r["sf"],
             "bandwidth":        r["bandwidth"],
@@ -809,6 +969,7 @@ def api_history():
             "gateways":         json.loads(r["gateways"] or "[]"),
             "payload_hex":      r["payload_hex"],
             "payload_text":     r["payload_text"],
+            "decoded_object":   json.loads(r["decoded_object"]) if r["decoded_object"] else None,
             "collision_detected": bool(r["collision_detected"]),
             "collision_reasons":json.loads(r["collision_reasons"] or "[]"),
             "crc_ok_count":     r["crc_ok_count"],
@@ -820,6 +981,58 @@ def api_history():
         "page": page,
         "per_page": per_page,
         "pages": (total + per_page - 1) // per_page,
+        "events": events_list,
+    })
+
+
+@app.route("/api/node-history/<dev_eui>")
+def api_node_history(dev_eui):
+    """특정 노드의 전체 수신 이력 반환"""
+    with get_db() as conn:
+        state_map = _get_fcnt_state_map(conn)
+        # 전체 건수는 별도 조회하고, 실제 반환은 최신 30건으로 제한합니다.
+        total = conn.execute(
+            "SELECT COUNT(*) FROM uplink_events WHERE dev_eui = ?",
+            [dev_eui],
+        ).fetchone()[0]
+
+        rows = conn.execute(
+            """SELECT * FROM uplink_events
+               WHERE dev_eui = ?
+               ORDER BY id DESC LIMIT 30""",
+            [dev_eui],
+        ).fetchall()
+
+    events_list = []
+    for r in rows:
+        events_list.append({
+            "id":               r["id"],
+            "time":             r["time"],
+            "dev_eui":          r["dev_eui"],
+            "dev_name":         r["dev_name"],
+            "dev_addr":         r["dev_addr"],
+            "f_cnt":            r["f_cnt"],
+            "raw_f_cnt":        r["f_cnt"],
+            "frequency_mhz":    r["frequency_mhz"],
+            "sf":               r["sf"],
+            "bandwidth":        r["bandwidth"],
+            "dr":               r["dr"],
+            "rssi":             json.loads(r["rssi"] or "[]"),
+            "snr":              json.loads(r["snr"] or "[]"),
+            "gateways":         json.loads(r["gateways"] or "[]"),
+            "payload_hex":      r["payload_hex"],
+            "payload_text":     r["payload_text"],
+            "decoded_object":   json.loads(r["decoded_object"]) if r["decoded_object"] else None,
+            "collision_detected": bool(r["collision_detected"]),
+            "collision_reasons":json.loads(r["collision_reasons"] or "[]"),
+            "crc_ok_count":     r["crc_ok_count"],
+            "total_gateways":   r["total_gateways"],
+        })
+
+    return jsonify({
+        "dev_eui": dev_eui,
+        "total": total,
+        "returned": len(events_list),
         "events": events_list,
     })
 
@@ -1062,6 +1275,57 @@ def api_delete_node(dev_eui):
         _device_client.Delete(req, metadata=_auth_metadata)
         print(f"[NODE] 삭제 완료: {dev_eui}")
         return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/clear-node-events/<dev_eui>", methods=["DELETE"])
+def api_clear_node_events(dev_eui):
+    """노드의 패킷 기록만 삭제 (fcnt 카운터는 유지)"""
+    global events, fcnt_gateway_map, fcnt_gateway_map_keys
+    try:
+        with _db_lock:
+            with get_db() as conn:
+                conn.execute("DELETE FROM uplink_events WHERE dev_eui = ?", (dev_eui,))
+                conn.commit()
+            events = deque([ev for ev in events if ev.get("dev_eui") != dev_eui], maxlen=MAX_EVENTS)
+            keys_to_remove = [k for k in list(fcnt_gateway_map.keys()) if k.startswith(f"{dev_eui}_")]
+            for k in keys_to_remove:
+                fcnt_gateway_map.pop(k, None)
+            fcnt_gateway_map_keys = deque(
+                [k for k in fcnt_gateway_map_keys if not k.startswith(f"{dev_eui}_")],
+                maxlen=_FCNT_MAP_MAXSIZE
+            )
+        # 캐시 무효화
+        _summary_cache["data"] = None
+        print(f"[NODE] 패킷 삭제 완료: {dev_eui}")
+        return jsonify({"success": True, "dev_eui": dev_eui})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/reset-node-history/<dev_eui>", methods=["POST"])
+def api_reset_node_history(dev_eui):
+    global events, last_fcnt, missed_frames, fcnt_gateway_map, fcnt_gateway_map_keys
+
+    try:
+        _set_node_history_reset(dev_eui)
+
+        with _db_lock:
+            events = deque([ev for ev in events if ev.get("dev_eui") != dev_eui], maxlen=MAX_EVENTS)
+            last_fcnt.pop(dev_eui, None)
+            missed_frames.pop(dev_eui, None)
+
+            keys_to_remove = [key for key in list(fcnt_gateway_map.keys()) if key.startswith(f"{dev_eui}_")]
+            for key in keys_to_remove:
+                fcnt_gateway_map.pop(key, None)
+            fcnt_gateway_map_keys = deque(
+                [k for k in fcnt_gateway_map_keys if not k.startswith(f"{dev_eui}_")],
+                maxlen=_FCNT_MAP_MAXSIZE
+            )
+
+        print(f"[NODE] 기록 초기화 완료: {dev_eui}")
+        return jsonify({"success": True, "dev_eui": dev_eui})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

@@ -35,7 +35,7 @@ services:
   chirpstack-gateway-bridge-basicstation:
     image: chirpstack/chirpstack-gateway-bridge:4
     restart: unless-stopped
-    command: -c /etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge-basicstation-eu868.toml
+    command: -c /etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge-basicstation-kr920.toml
     ports:
       - "3001:3001"
     volumes:
