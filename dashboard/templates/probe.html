@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>지연 측정 프로브 - LoRa Dashboard</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 15px; background: #f0f2f5; }
+
+    .header {
+      background: white; padding: 15px 20px; border-radius: 8px;
+      margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .header h1 { margin: 0; font-size: 20px; color: #1e293b; }
+    .header .sub { margin: 4px 0 0 0; font-size: 12px; color: #94a3b8; }
+
+    .btn-back {
+      background: #f1f5f9; color: #475569; border: 1.5px solid #cbd5e1;
+      text-decoration: none; display: inline-flex; align-items: center;
+      padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
+    }
+
+    .section {
+      background: white; border-radius: 8px; padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 15px;
+    }
+    .section-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 16px; padding-bottom: 12px; border-bottom: 2px solid #667eea;
+    }
+    .section-header h2 { margin: 0; font-size: 16px; color: #1e293b; }
+
+    /* 상태 배지 — 색만으로 구분하지 않도록 항상 텍스트를 같이 쓴다 */
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 14px; border-radius: 14px;
+      font-size: 13px; font-weight: 700; color: #fff; background: #94a3b8;
+    }
+
+    .stats-bar {
+      display: flex; gap: 22px; flex-wrap: wrap;
+      background: #f8fafc; border-radius: 8px; padding: 14px 18px;
+    }
+    .stat-item { display: flex; flex-direction: column; min-width: 96px; }
+    .stat-item .s-label { font-size: 11px; color: #94a3b8; font-weight: 600; }
+    .stat-item .s-value { font-size: 18px; font-weight: 700; color: #1e293b; }
+
+    .meta {
+      font-size: 12px; color: #64748b; margin-top: 14px; line-height: 1.8;
+    }
+    .meta b { color: #1e293b; }
+
+    .chart-wrap { position: relative; height: 300px; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead tr { background: #f8fafc; border-bottom: 2px solid #e2e8f0; }
+    th { padding: 10px 12px; text-align: left; font-weight: 600; color: #475569; white-space: nowrap; }
+    td { padding: 9px 12px; border-bottom: 1px solid #f1f5f9; }
+    tbody tr:hover { background: #f8fafc; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+    .note {
+      background: #fffbeb; border-left: 4px solid #f0a020;
+      padding: 14px 16px; border-radius: 6px;
+      font-size: 12px; color: #713f12; line-height: 1.8;
+    }
+    .note code { background: #fef3c7; padding: 1px 5px; border-radius: 3px; }
+
+    .empty { color: #94a3b8; text-align: center; padding: 40px; font-size: 14px; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div>
+      <h1>📡 지연 측정 프로브</h1>
+      <p class="sub">Tailscale 경로의 왕복 지연·손실 측정이 정상 동작 중인지 확인</p>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <span class="badge" id="probeBadge">확인 중</span>
+      <a href="/" class="btn-back">← 대시보드</a>
+      <a href="/history" class="btn-back">수신 기록</a>
+      <a href="/nodes" class="btn-back">노드 관리</a>
+    </div>
+  </div>
+
+  <div id="probeEmpty" class="section">
+    <p class="empty" id="probeEmptyMsg">프로브 데이터를 불러오는 중…</p>
+  </div>
+
+  <div id="probeBody" style="display:none;">
+
+    <!-- 상태 요약 -->
+    <div class="section">
+      <div class="section-header"><h2>상태 요약</h2></div>
+      <div class="stats-bar">
+        <div class="stat-item"><span class="s-label">마지막 수신</span><span class="s-value" id="kLastSeen">-</span></div>
+        <div class="stat-item"><span class="s-label">손실률</span><span class="s-value" id="kLoss">-</span></div>
+        <div class="stat-item"><span class="s-label">송신 주기</span><span class="s-value" id="kInterval">-</span></div>
+        <div class="stat-item"><span class="s-label">서버 처리시간</span><span class="s-value" id="kProc">-</span></div>
+        <div class="stat-item"><span class="s-label">경로</span><span class="s-value" id="kPath">-</span></div>
+        <div class="stat-item"><span class="s-label">누적 수신</span><span class="s-value" id="kTotal">-</span></div>
+      </div>
+      <div class="meta">
+        송신 노드 <b id="mSrc">-</b> (<span id="mPeer">-</span>)
+        · run <span id="mRun">-</span>
+        · 최신 seq <span id="mSeq">-</span>
+        · 시각출처 <span id="mTsrc">-</span>
+        · run 내 수신 <span id="mRecv">-</span>건 / 결측 <span id="mMissing">-</span>건
+      </div>
+    </div>
+
+    <!-- 추이 -->
+    <div class="section">
+      <div class="section-header">
+        <h2>겉보기 편도 지연 추이 (ms)</h2>
+        <span style="font-size:12px;color:#94a3b8;">최근 60개 샘플</span>
+      </div>
+      <div class="chart-wrap"><canvas id="owdChart"></canvas></div>
+    </div>
+
+    <!-- 최근 샘플 (차트의 표 대체 뷰) -->
+    <div class="section">
+      <div class="section-header"><h2>최근 샘플</h2></div>
+      <table>
+        <thead>
+          <tr>
+            <th>seq</th>
+            <th class="num">겉보기 편도 (ms)</th>
+            <th class="num">서버 처리 (µs)</th>
+            <th>경로</th>
+          </tr>
+        </thead>
+        <tbody id="probe-body"></tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <div class="note">
+        <b>⚠️ 겉보기 편도(<code>t2−t1</code>)를 지연으로 읽지 마세요.</b><br>
+        이 값에는 게이트웨이와 서버의 <b>시계 오프셋이 그대로 섞여 있습니다.</b>
+        절대값은 의미가 없고(음수도 나옵니다) 흔들림과 추세를 보는 용도입니다.<br>
+        실제 <b>RTT와 시계 오프셋은 게이트웨이에서만</b> 계산됩니다 —
+        서버 DB에는 <code>t1·t2·t3</code>만 있고 <code>t4</code>가 없기 때문입니다.
+        4-타임스탬프 방식의 이유와 계산식은 <code>docs/latency-probe/protocol.md</code>에 있습니다.
+      </div>
+    </div>
+
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    let owdChart = null;
+
+    const STATUS = {
+      ok:    ['● 정상',  '#2e7d32'],
+      stale: ['▲ 지연',  '#b26a00'],
+      down:  ['■ 끊김',  '#c62828']
+    };
+
+    function renderChart(recent) {
+      // 오래된 것 -> 최신 순으로 뒤집어 시간축을 만든다
+      const rows = recent.slice().reverse();
+      const labels = rows.map(r => r.seq);
+      const data = rows.map(r => r.owd_ms);
+
+      if (owdChart) {
+        owdChart.data.labels = labels;
+        owdChart.data.datasets[0].data = data;
+        owdChart.update('none');
+        return;
+      }
+
+      const ctx = document.getElementById('owdChart').getContext('2d');
+      owdChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          // 단일 계열이라 범례를 두지 않는다 — 섹션 제목이 계열명을 대신한다
+          datasets: [{
+            label: '겉보기 편도 (ms)',
+            data,
+            borderColor: '#667eea',
+            backgroundColor: 'rgba(102,126,234,0.10)',
+            borderWidth: 2,
+            pointRadius: 0,
+            pointHoverRadius: 5,
+            pointHoverBackgroundColor: '#667eea',
+            pointHoverBorderColor: '#fff',
+            pointHoverBorderWidth: 2,
+            tension: 0.25,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                title: items => 'seq ' + items[0].label,
+                label: item => item.parsed.y.toFixed(2) + ' ms'
+              }
+            }
+          },
+          scales: {
+            x: {
+              title: { display: true, text: 'seq', color: '#94a3b8', font: { size: 11 } },
+              grid: { display: false },
+              ticks: { color: '#94a3b8', font: { size: 10 }, maxTicksLimit: 12 }
+            },
+            y: {
+              title: { display: true, text: 'ms', color: '#94a3b8', font: { size: 11 } },
+              grid: { color: '#f1f5f9' },
+              border: { display: false },
+              ticks: { color: '#94a3b8', font: { size: 10 } }
+            }
+          }
+        }
+      });
+    }
+
+    async function refreshProbe() {
+      const badge = document.getElementById('probeBadge');
+      const empty = document.getElementById('probeEmpty');
+      const emptyMsg = document.getElementById('probeEmptyMsg');
+      const body = document.getElementById('probeBody');
+
+      try {
+        const d = await (await fetch('/api/probe?limit=60')).json();
+
+        if (!d.available) {
+          badge.textContent = '미가동';
+          badge.style.background = '#94a3b8';
+          emptyMsg.textContent = d.reason || '프로브 데이터 없음';
+          empty.style.display = 'block';
+          body.style.display = 'none';
+          return;
+        }
+
+        const st = STATUS[d.status] || ['알 수 없음', '#94a3b8'];
+        badge.textContent = st[0];
+        badge.style.background = st[1];
+
+        empty.style.display = 'none';
+        body.style.display = 'block';
+
+        document.getElementById('kLastSeen').textContent = d.last_seen_sec + '초 전';
+        document.getElementById('kLoss').textContent = d.loss_pct.toFixed(2) + '%';
+        document.getElementById('kInterval').textContent =
+          d.interval_sec != null ? d.interval_sec.toFixed(2) + 's' : '-';
+        document.getElementById('kProc').textContent =
+          d.proc_us_avg != null ? d.proc_us_avg.toFixed(0) + ' µs' : '-';
+        document.getElementById('kPath').textContent = d.path || '-';
+        document.getElementById('kTotal').textContent = d.total_received;
+
+        // 손실과 DERP 폴백은 눈에 띄어야 한다 (수치 텍스트가 함께 있으므로 색만으로 구분하지 않음)
+        document.getElementById('kLoss').style.color = d.loss_pct > 0 ? '#c62828' : '#1e293b';
+        document.getElementById('kPath').style.color = (d.path === 'direct') ? '#2e7d32' : '#b26a00';
+
+        document.getElementById('mSrc').textContent = d.src;
+        document.getElementById('mPeer').textContent = d.peer;
+        document.getElementById('mRun').textContent = d.run;
+        document.getElementById('mSeq').textContent = d.last_seq;
+        document.getElementById('mTsrc').textContent = d.tsrc;
+        document.getElementById('mRecv').textContent = d.run_received;
+        document.getElementById('mMissing').textContent = d.run_missing;
+
+        renderChart(d.recent || []);
+
+        const tbody = document.getElementById('probe-body');
+        tbody.innerHTML = '';
+        (d.recent || []).slice(0, 20).forEach(r => {
+          const tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td>' + r.seq + '</td>' +
+            '<td class="num">' + r.owd_ms.toFixed(2) + '</td>' +
+            '<td class="num">' + r.proc_us.toFixed(0) + '</td>' +
+            '<td>' + (r.path || '-') + '</td>';
+          tbody.appendChild(tr);
+        });
+      } catch (e) {
+        console.error('[ERR] refreshProbe:', e);
+        badge.textContent = '조회 실패';
+        badge.style.background = '#c62828';
+      }
+    }
+
+    refreshProbe();
+    setInterval(refreshProbe, 5000);
+  </script>
+</body>
+</html>

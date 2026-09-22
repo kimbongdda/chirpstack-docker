@@ -609,6 +609,11 @@ def nodes_page():
     return render_template("nodes.html")
 
 
+@app.route("/probe")
+def probe_page():
+    return render_template("probe.html")
+
+
 @app.route("/")
 def index():
     response = render_template("index.html")
@@ -777,9 +782,13 @@ def api_probe():
             missing = max(0, expected - recv)
             loss_pct = (missing / expected * 100.0) if expected else 0.0
 
+            # 추이 그래프용. 기본 60개면 10초 주기 기준 약 10분치.
+            from flask import request as flask_request
+            limit = flask_request.args.get("limit", default=60, type=int) or 60
+            limit = max(10, min(500, limit))
             recent = [dict(r) for r in conn.execute(
                 "SELECT run, seq, t1, t2, t3, tsrc, path FROM probe_rx"
-                " WHERE run = ? ORDER BY id DESC LIMIT 30", (run,))]
+                " WHERE run = ? ORDER BY id DESC LIMIT ?", (run, limit))]
     except sqlite3.Error as e:
         return jsonify({"available": False, "reason": f"DB 조회 실패: {e}"})
 
@@ -792,15 +801,17 @@ def api_probe():
     elif last_seen_sec > PROBE_STALE_SEC:
         status = "stale"
 
+    # 요약 수치는 limit 값에 따라 흔들리지 않도록 항상 최근 30개로 고정한다.
+    window = recent[:30]
     # 서버 처리시간 (t3-t2). RTT 에서 차감되는 값이라 작을수록 좋다.
-    procs = [(r["t3"] - r["t2"]) / 1000.0 for r in recent]
+    procs = [(r["t3"] - r["t2"]) / 1000.0 for r in window]
     # 게이트웨이 송신 주기 실측 (t1 간격)
-    t1s = sorted(r["t1"] for r in recent)
+    t1s = sorted(r["t1"] for r in window)
     gaps = [(t1s[i + 1] - t1s[i]) / 1e9 for i in range(len(t1s) - 1)]
     gaps = [g for g in gaps if 0 < g < 120]
     # 겉보기 편도 (t2-t1). 두 장비의 시계 오프셋이 그대로 섞여 있으므로
     # 절대값을 지연으로 해석하면 안 된다. 추세 확인용으로만 쓴다.
-    owds = [(r["t2"] - r["t1"]) / 1e6 for r in recent]
+    owds = [(r["t2"] - r["t1"]) / 1e6 for r in window]
 
     def _avg(xs):
         return sum(xs) / len(xs) if xs else None
