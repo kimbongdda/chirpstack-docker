@@ -727,6 +727,112 @@ def api_collisions():
     })
 
 
+# ===================== 지연 측정 프로브 =====================
+# probe/probe_server.py 가 호스트에서 기록하는 DB 를 읽기 전용으로 조회한다.
+# 규격: docs/latency-probe/protocol.md
+#
+# 주의: 서버 DB 에는 t1/t2/t3 만 있고 t4 가 없다. RTT 와 시계 오프셋은 4개
+# 타임스탬프를 모두 가진 게이트웨이 쪽에서만 계산할 수 있다. 여기서는
+# "측정이 정상 동작 중인가"(수신 여부·손실·주기·경로)를 판정한다.
+
+PROBE_DB_PATH = os.getenv("PROBE_DB_PATH", "/app/probe/probe_server.db")
+
+PROBE_STALE_SEC = 30    # 이 시간 넘게 수신 없으면 지연
+PROBE_DOWN_SEC = 90     # 이 시간 넘게 수신 없으면 끊김
+
+
+def _probe_db():
+    """쓰기 중인 DB 를 건드리지 않도록 read-only 로 연다."""
+    conn = sqlite3.connect(f"file:{PROBE_DB_PATH}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+@app.route("/api/probe")
+def api_probe():
+    import time as _time
+
+    if not os.path.exists(PROBE_DB_PATH):
+        return jsonify({"available": False,
+                        "reason": "프로브 DB 없음 (응답기 미가동)"})
+
+    try:
+        with _probe_db() as conn:
+            row = conn.execute(
+                "SELECT run, seq, src, peer, t1, t2, t3, tsrc, path"
+                " FROM probe_rx WHERE src NOT LIKE 'selftest%' AND src != 'pretest'"
+                " ORDER BY id DESC LIMIT 1").fetchone()
+            if row is None:
+                return jsonify({"available": False,
+                                "reason": "수신된 프로브 없음"})
+
+            run = row["run"]
+            total = conn.execute("SELECT COUNT(*) FROM probe_rx").fetchone()[0]
+
+            # 현재 run 의 seq 연속성으로 상행(게이트웨이->서버) 손실을 판정한다.
+            seqs = [r[0] for r in conn.execute(
+                "SELECT seq FROM probe_rx WHERE run = ? ORDER BY seq", (run,))]
+            recv = len(seqs)
+            expected = (max(seqs) - min(seqs) + 1) if seqs else 0
+            missing = max(0, expected - recv)
+            loss_pct = (missing / expected * 100.0) if expected else 0.0
+
+            recent = [dict(r) for r in conn.execute(
+                "SELECT run, seq, t1, t2, t3, tsrc, path FROM probe_rx"
+                " WHERE run = ? ORDER BY id DESC LIMIT 30", (run,))]
+    except sqlite3.Error as e:
+        return jsonify({"available": False, "reason": f"DB 조회 실패: {e}"})
+
+    now_ns = _time.time_ns()
+    last_seen_sec = (now_ns - row["t2"]) / 1e9
+
+    status = "ok"
+    if last_seen_sec > PROBE_DOWN_SEC:
+        status = "down"
+    elif last_seen_sec > PROBE_STALE_SEC:
+        status = "stale"
+
+    # 서버 처리시간 (t3-t2). RTT 에서 차감되는 값이라 작을수록 좋다.
+    procs = [(r["t3"] - r["t2"]) / 1000.0 for r in recent]
+    # 게이트웨이 송신 주기 실측 (t1 간격)
+    t1s = sorted(r["t1"] for r in recent)
+    gaps = [(t1s[i + 1] - t1s[i]) / 1e9 for i in range(len(t1s) - 1)]
+    gaps = [g for g in gaps if 0 < g < 120]
+    # 겉보기 편도 (t2-t1). 두 장비의 시계 오프셋이 그대로 섞여 있으므로
+    # 절대값을 지연으로 해석하면 안 된다. 추세 확인용으로만 쓴다.
+    owds = [(r["t2"] - r["t1"]) / 1e6 for r in recent]
+
+    def _avg(xs):
+        return sum(xs) / len(xs) if xs else None
+
+    return jsonify({
+        "available": True,
+        "status": status,
+        "src": row["src"],
+        "peer": row["peer"],
+        "run": run,
+        "last_seq": row["seq"],
+        "last_seen_sec": round(last_seen_sec, 1),
+        "total_received": total,
+        "run_received": recv,
+        "run_missing": missing,
+        "loss_pct": round(loss_pct, 2),
+        "path": row["path"],
+        "tsrc": row["tsrc"],
+        "interval_sec": round(_avg(gaps), 2) if gaps else None,
+        "proc_us_avg": round(_avg(procs), 1) if procs else None,
+        "proc_us_max": round(max(procs), 1) if procs else None,
+        "apparent_owd_ms_avg": round(_avg(owds), 2) if owds else None,
+        "recent": [
+            {"seq": r["seq"],
+             "owd_ms": round((r["t2"] - r["t1"]) / 1e6, 2),
+             "proc_us": round((r["t3"] - r["t2"]) / 1000.0, 1),
+             "path": r["path"]}
+            for r in recent
+        ],
+    })
+
+
 @app.route("/api/summary")
 def api_summary():
     import time as _time

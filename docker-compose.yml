@@ -89,6 +89,9 @@ services:
       - TZ=Asia/Seoul
     volumes:
       - dashboarddata:/app/data
+      # 지연 측정 프로브 DB (probe/probe_server.py 가 호스트에서 기록).
+      # 대시보드는 읽기만 하므로 read-only 로 붙인다.
+      - ./probe/data:/app/probe:ro
     depends_on:
       - mosquitto
       - chirpstack
