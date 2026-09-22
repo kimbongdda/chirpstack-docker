@@ -95,22 +95,32 @@ TSRC     = "sys"         # §2 결과에 따라 "gps" 로 변경
 logq  = queue.Queue(maxsize=200000)
 _path = {"path": "unknown", "relay": ""}
 
+def resolve_path():
+    """서버 노드의 Tailscale 경로를 1회 조회한다. 실패하면 None."""
+    try:
+        out = subprocess.run(["tailscale", "status", "--json"],
+                             capture_output=True, timeout=10).stdout
+        js = json.loads(out)
+        for p in (js.get("Peer") or {}).values():
+            # 노드 식별은 반드시 Tailscale IP로 한다.
+            # HostName은 OS 호스트명(WIN-OB5FI29VAFC)이고 DNSName은 관리 콘솔에서
+            # 바꾼 이름(aeron-sever)이라 서로 다르다. 이름으로 매칭하면
+            # 노드 이름을 바꾸는 순간 조용히 깨진다.
+            if SERVER[0] in (p.get("TailscaleIPs") or []):
+                if p.get("CurAddr"):
+                    return ("direct", "")
+                return ("derp", p.get("Relay") or "")
+    except Exception:
+        pass
+    return None
+
+
 def path_watcher():
     """Tailscale 경로(direct/derp)를 60초마다 갱신. 매 프로브마다 호출하면 부하가 크다."""
     while True:
-        try:
-            out = subprocess.run(["tailscale", "status", "--json"],
-                                 capture_output=True, timeout=10).stdout
-            js = json.loads(out)
-            for p in (js.get("Peer") or {}).values():
-                if p.get("HostName", "").startswith("aeron"):
-                    if p.get("CurAddr"):
-                        _path.update(path="direct", relay="")
-                    else:
-                        _path.update(path="derp", relay=p.get("Relay") or "")
-                    break
-        except Exception:
-            pass
+        r = resolve_path()
+        if r:
+            _path.update(path=r[0], relay=r[1])
         time.sleep(60)
 
 def writer():
@@ -137,6 +147,12 @@ def writer():
 def main():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     threading.Thread(target=writer, daemon=True).start()
+
+    # 첫 프로브가 path="unknown"으로 기록되지 않도록 선행 조회한다.
+    # watcher 스레드만 두면 첫 tailscale status가 끝나기 전에 seq=1이 나간다.
+    r0 = resolve_path()
+    if r0:
+        _path.update(path=r0[0], relay=r0[1])
     threading.Thread(target=path_watcher, daemon=True).start()
 
     run = int(time.time())
