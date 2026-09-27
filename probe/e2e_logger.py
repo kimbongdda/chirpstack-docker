@@ -31,7 +31,13 @@ from chirpstack_api import gw
 
 MQTT_HOST = os.getenv("MQTT_HOST", "127.0.0.1")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
-TOPIC     = os.getenv("GW_TOPIC", "kr920/gateway/+/event/up")
+# 지역 prefix 를 와일드카드로 둔다.
+#
+# 토픽은 '<region>/gateway/<eui>/event/up' 형태다. kr920 을 박아두면 베트남
+# (as923_2) 이전 시 조용히 아무것도 안 잡힌다 — 에러도 안 나서 알아채기 어렵다.
+# prefix 를 '+' 로 받으면 지역이 바뀌어도 설정 변경 없이 그대로 동작하고,
+# 어느 지역에서 온 프레임인지는 region 컬럼에 남긴다.
+TOPIC     = os.getenv("GW_TOPIC", "+/gateway/+/event/up")
 DB_PATH   = os.getenv("E2E_DB_PATH",
                       r"C:\Users\Administrator\chirpstack-docker\probe\data\e2e_latency.db")
 
@@ -58,7 +64,12 @@ def writer():
         -- toa_ms: 계산한 time-on-air. gw_time 이 수신 시작/끝 중
         --         어느 쪽을 가리키는지 판별하는 데 쓴다
         tmst INTEGER,
-        toa_ms REAL)""")
+        toa_ms REAL,
+        region TEXT)""")
+    # 기존 DB 이행: region 컬럼이 없으면 추가한다
+    cols = {r[1] for r in con.execute("PRAGMA table_info(e2e)")}
+    if "region" not in cols:
+        con.execute("ALTER TABLE e2e ADD COLUMN region TEXT")
     con.execute("CREATE INDEX IF NOT EXISTS ix_recv ON e2e(recv_ns)")
     con.commit()
     buf = []
@@ -67,8 +78,8 @@ def writer():
         if len(buf) >= 20 or logq.empty():
             con.executemany(
                 "INSERT INTO e2e(recv_ns,gw_time_ns,raw_ms,gateway_id,freq_hz,"
-                "sf,bw_hz,rssi,snr,crc_ok,size,tmst,toa_ms)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", buf)
+                "sf,bw_hz,rssi,snr,crc_ok,size,tmst,toa_ms,region)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", buf)
             con.commit()
             buf.clear()
 
@@ -97,6 +108,7 @@ def on_connect(client, userdata, flags, rc):
 
 def on_message(client, userdata, msg):
     recv_ns = time.time_ns()                     # <- 수신 직후, 호스트 시계
+    region = msg.topic.split("/", 1)[0] if msg.topic else None
     try:
         up = gw.UplinkFrame()
         up.ParseFromString(msg.payload)
@@ -126,6 +138,7 @@ def on_message(client, userdata, msg):
             size,
             tmst,
             time_on_air_ms(lora.spreading_factor, lora.bandwidth, size),
+            region,
         ))
     except queue.Full:
         pass
