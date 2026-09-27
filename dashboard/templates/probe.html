@@ -136,6 +136,47 @@
       </table>
     </div>
 
+    <!-- 회선 끊김 이력 -->
+    <div class="section">
+      <div class="section-header">
+        <h2>회선 끊김 이력</h2>
+        <select id="outageHours" onchange="refreshOutages()"
+                style="padding:6px 10px;border:1.5px solid #e2e8f0;border-radius:6px;font-size:13px;">
+          <option value="6">최근 6시간</option>
+          <option value="24" selected>최근 24시간</option>
+          <option value="168">최근 7일</option>
+        </select>
+      </div>
+
+      <div class="stats-bar" style="margin-bottom:16px;">
+        <div class="stat-item"><span class="s-label">끊김 횟수</span><span class="s-value" id="oCount">-</span></div>
+        <div class="stat-item"><span class="s-label">총 끊김 시간</span><span class="s-value" id="oTotal">-</span></div>
+        <div class="stat-item"><span class="s-label">최장 끊김</span><span class="s-value" id="oLongest">-</span></div>
+        <div class="stat-item"><span class="s-label">가용률</span><span class="s-value" id="oAvail">-</span></div>
+        <div class="stat-item"><span class="s-label">경로 전환</span><span class="s-value" id="oPathChg">-</span></div>
+      </div>
+
+      <p id="oNone" class="empty" style="display:none;padding:24px;">해당 기간에 끊김이 없습니다.</p>
+      <table id="oTable">
+        <thead>
+          <tr>
+            <th>시작</th>
+            <th>복구</th>
+            <th class="num">지속</th>
+            <th class="num">유실(추정)</th>
+            <th>비고</th>
+          </tr>
+        </thead>
+        <tbody id="outage-body"></tbody>
+      </table>
+
+      <p style="font-size:11px;color:#94a3b8;margin-top:10px;line-height:1.7;">
+        프로브 수신 간격이 정상 주기의 2.5배 이상 벌어진 구간을 끊김으로 판정합니다.
+        <b>해상도는 프로브 주기(<span id="oNominal">-</span>초)가 한계</b>라, 그보다 짧은 순단은 잡히지 않습니다.
+        <code>run</code>이 바뀐 구간은 게이트웨이 쪽 프로세스가 재시작된 것입니다.
+      </p>
+    </div>
+
     <div class="section">
       <div class="note">
         <b>⚠️ 겉보기 편도(<code>t2−t1</code>)를 지연으로 읽지 마세요.</b><br>
@@ -289,8 +330,67 @@
       }
     }
 
+    function fmtDur(sec) {
+      if (sec < 60) return sec.toFixed(0) + '초';
+      if (sec < 3600) return Math.floor(sec / 60) + '분 ' + Math.round(sec % 60) + '초';
+      return Math.floor(sec / 3600) + '시간 ' + Math.round((sec % 3600) / 60) + '분';
+    }
+
+    function fmtTime(ms) {
+      const d = new Date(ms);
+      const p = n => String(n).padStart(2, '0');
+      return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    }
+
+    async function refreshOutages() {
+      const hours = document.getElementById('outageHours').value;
+      try {
+        const d = await (await fetch('/api/probe/outages?hours=' + hours)).json();
+        if (!d.available) return;
+
+        document.getElementById('oCount').textContent = d.outage_count ?? '-';
+        document.getElementById('oTotal').textContent = d.outage_total_sec != null ? fmtDur(d.outage_total_sec) : '-';
+        document.getElementById('oLongest').textContent = d.longest_sec ? fmtDur(d.longest_sec) : '없음';
+        document.getElementById('oAvail').textContent = d.availability_pct != null ? d.availability_pct.toFixed(2) + '%' : '-';
+        document.getElementById('oPathChg').textContent = d.path_change_count ?? '-';
+        document.getElementById('oNominal').textContent = d.nominal_interval_sec ?? '-';
+
+        // 가용률이 낮거나 끊김이 잦으면 드러나야 한다
+        document.getElementById('oAvail').style.color =
+          (d.availability_pct != null && d.availability_pct < 99) ? '#c62828' : '#1e293b';
+
+        const tbody = document.getElementById('outage-body');
+        const table = document.getElementById('oTable');
+        const none = document.getElementById('oNone');
+        tbody.innerHTML = '';
+
+        if (!d.outages || d.outages.length === 0) {
+          table.style.display = 'none';
+          none.style.display = 'block';
+          return;
+        }
+        table.style.display = 'table';
+        none.style.display = 'none';
+
+        d.outages.forEach(o => {
+          const tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td>' + fmtTime(o.start) + '</td>' +
+            '<td>' + fmtTime(o.end) + '</td>' +
+            '<td class="num">' + fmtDur(o.duration_sec) + '</td>' +
+            '<td class="num">' + o.missed_est + '</td>' +
+            '<td>' + (o.restarted ? '프로세스 재시작' : '') + '</td>';
+          tbody.appendChild(tr);
+        });
+      } catch (e) {
+        console.error('[ERR] refreshOutages:', e);
+      }
+    }
+
     refreshProbe();
+    refreshOutages();
     setInterval(refreshProbe, 5000);
+    setInterval(refreshOutages, 30000);
   </script>
 </body>
 </html>

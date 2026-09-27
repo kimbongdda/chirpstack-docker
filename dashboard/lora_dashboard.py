@@ -844,6 +844,105 @@ def api_probe():
     })
 
 
+@app.route("/api/probe/outages")
+def api_probe_outages():
+    """프로브 수신 간격의 구멍으로 회선 끊김 구간을 복원한다.
+
+    스타링크는 CGNAT + 위성 핸드오버 때문에 주기적으로 끊긴다. 게이트웨이가
+    끊긴 동안 서버는 '아무것도 못 받는' 상태가 되므로, 수신 시각(t2)의 간격이
+    정상 주기보다 크게 벌어진 구간을 끊김으로 판정한다.
+
+    해상도는 프로브 주기(기본 10초)가 한계다. 그보다 짧은 끊김은 잡히지 않는다.
+    """
+    import time as _time
+
+    if not os.path.exists(PROBE_DB_PATH):
+        return jsonify({"available": False, "reason": "프로브 DB 없음"})
+
+    from flask import request as flask_request
+    hours = flask_request.args.get("hours", default=24, type=int) or 24
+    hours = max(1, min(720, hours))
+    # 정상 주기의 2.5배 이상 벌어지면 끊김으로 본다 (1회 유실은 지터로 간주)
+    gap_factor = 2.5
+
+    try:
+        since_ns = _time.time_ns() - hours * 3600 * 1_000_000_000
+        with _probe_db() as conn:
+            rows = conn.execute(
+                "SELECT t2, seq, run, path FROM probe_rx"
+                " WHERE src = 'rak7248-gw' AND t2 >= ?"
+                " ORDER BY t2", (since_ns,)).fetchall()
+    except sqlite3.Error as e:
+        return jsonify({"available": False, "reason": f"DB 조회 실패: {e}"})
+
+    if len(rows) < 3:
+        return jsonify({"available": True, "outages": [], "path_changes": [],
+                        "sample_count": len(rows), "hours": hours,
+                        "note": "표본 부족"})
+
+    gaps = [(rows[i + 1]["t2"] - rows[i]["t2"]) / 1e9 for i in range(len(rows) - 1)]
+    # 정상 주기는 중앙값으로 잡는다 (끊김 구간에 휘둘리지 않게)
+    nominal = sorted(gaps)[len(gaps) // 2] or 10.0
+    threshold = nominal * gap_factor
+
+    outages = []
+    for i, g in enumerate(gaps):
+        if g <= threshold:
+            continue
+        a, b = rows[i], rows[i + 1]
+        outages.append({
+            "start": a["t2"] // 1_000_000,          # ms epoch
+            "end": b["t2"] // 1_000_000,
+            "duration_sec": round(g, 1),
+            "missed_est": max(0, int(round(g / nominal)) - 1),
+            "seq_before": a["seq"],
+            "seq_after": b["seq"],
+            # run 이 바뀌었으면 게이트웨이 쪽 프로세스가 재시작된 것
+            "restarted": a["run"] != b["run"],
+        })
+
+    # direct <-> derp 전환. 지연 분포가 달라지므로 같이 남긴다.
+    #
+    # "unknown" 은 게이트웨이가 tailscale status 를 못 읽은 표본이지 경로 변화가
+    # 아니다. 그대로 두면 direct -> unknown -> direct 가 전환 2회로 잡혀 분석이
+    # 오염되므로, 마지막으로 '확인된' 경로와만 비교한다.
+    path_changes = []
+    unknown_samples = 0
+    last_known = None
+    for r in rows:
+        p = r["path"]
+        if not p or p == "unknown":
+            unknown_samples += 1
+            continue
+        if last_known is not None and p != last_known:
+            path_changes.append({
+                "at": r["t2"] // 1_000_000,
+                "from": last_known,
+                "to": p,
+            })
+        last_known = p
+
+    total_out = sum(o["duration_sec"] for o in outages)
+    span_sec = (rows[-1]["t2"] - rows[0]["t2"]) / 1e9
+
+    return jsonify({
+        "available": True,
+        "hours": hours,
+        "sample_count": len(rows),
+        "nominal_interval_sec": round(nominal, 2),
+        "threshold_sec": round(threshold, 1),
+        "span_sec": round(span_sec, 1),
+        "outage_count": len(outages),
+        "outage_total_sec": round(total_out, 1),
+        "availability_pct": round(100.0 * (1 - total_out / span_sec), 3) if span_sec else None,
+        "longest_sec": round(max((o["duration_sec"] for o in outages), default=0), 1),
+        "path_change_count": len(path_changes),
+        "unknown_samples": unknown_samples,
+        "outages": list(reversed(outages))[:50],
+        "path_changes": list(reversed(path_changes))[:50],
+    })
+
+
 @app.route("/api/summary")
 def api_summary():
     import time as _time
