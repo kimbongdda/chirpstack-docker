@@ -1,0 +1,7 @@
+[Unit]
+Description=Tailscale tunnel socket watchdog for LoRa gateway
+After=tailscaled.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/tunnel-watchdog.sh
