@@ -5,6 +5,8 @@ Gateway EUI: `2ccf67fffe405e3c`
 
 먼저 [protocol.md](protocol.md)를 읽을 것. 아래 구현은 그 규격을 따른다.
 
+현재 운영 상태(배포 버전, 측정값, 남은 작업)는 [rak7248-gw-status.md](rak7248-gw-status.md) 참고.
+
 ## ⚠️ 절대 건드리지 말 것
 
 이 장비는 **운영 중인 게이트웨이**다. 아래를 변경하면 데이터 수집이 끊긴다.
