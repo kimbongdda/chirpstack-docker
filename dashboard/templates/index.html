@@ -620,7 +620,10 @@
   <div class="graphs-section" id="gatewaySection">
     <div class="graph-header" style="display:flex;justify-content:space-between;align-items:center;">
       <h2>게이트웨이 목록</h2>
-      <button onclick="openGwMap()" style="padding:7px 16px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">🗺 지도 보기</button>
+      <div style="display:flex;gap:8px;">
+        <button onclick="openGwRegister()" style="padding:7px 16px;background:#f1f5f9;color:#475569;border:1.5px solid #cbd5e1;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">+ 게이트웨이 등록</button>
+        <button onclick="openGwMap()" style="padding:7px 16px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">🗺 지도 보기</button>
+      </div>
     </div>
     <div id="gatewayCards" style="display:flex;flex-wrap:wrap;gap:12px;"></div>
   </div>
@@ -745,6 +748,64 @@
       <div id="gwMapNoGps" class="map-no-gps" style="display:none;">
         📡 GPS 정보가 있는 게이트웨이가 없습니다.<br>
         <span style="font-size:12px;">ChirpStack admin에서 게이트웨이 위치를 설정하거나, GPS 모듈이 탑재된 게이트웨이를 사용하세요.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 게이트웨이 등록 모달 -->
+  <div id="gwRegModal" class="modal">
+    <div class="modal-content" style="max-width:520px;">
+      <div class="modal-header">
+        <h2>게이트웨이 등록</h2>
+        <button class="close-btn" onclick="closeGwRegister()">×</button>
+      </div>
+
+      <div class="info-grid" style="grid-template-columns:1fr;">
+        <div class="info-item">
+          <div class="info-label">Gateway EUI *</div>
+          <input id="gwRegEui" placeholder="2ccf67fffe405e3c" maxlength="23"
+                 style="width:100%;padding:8px;border:1.5px solid #e2e8f0;border-radius:4px;font-family:monospace;font-size:13px;">
+          <div style="font-size:11px;color:#999;margin-top:4px;">16자 hex. 구분자(<code>:</code>, <code>-</code>)는 자동 제거됩니다.</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">이름 *</div>
+          <input id="gwRegName" placeholder="aeron-gateway-vn"
+                 style="width:100%;padding:8px;border:1.5px solid #e2e8f0;border-radius:4px;font-size:13px;">
+        </div>
+        <div class="info-item">
+          <div class="info-label">설명</div>
+          <input id="gwRegDesc" placeholder="베트남 현장 1호기"
+                 style="width:100%;padding:8px;border:1.5px solid #e2e8f0;border-radius:4px;font-size:13px;">
+        </div>
+      </div>
+
+      <div class="info-grid" style="grid-template-columns:1fr 1fr 1fr;">
+        <div class="info-item">
+          <div class="info-label">위도</div>
+          <input id="gwRegLat" placeholder="36.35588" inputmode="decimal"
+                 style="width:100%;padding:8px;border:1.5px solid #e2e8f0;border-radius:4px;font-family:monospace;font-size:13px;">
+        </div>
+        <div class="info-item">
+          <div class="info-label">경도</div>
+          <input id="gwRegLon" placeholder="127.41932" inputmode="decimal"
+                 style="width:100%;padding:8px;border:1.5px solid #e2e8f0;border-radius:4px;font-family:monospace;font-size:13px;">
+        </div>
+        <div class="info-item">
+          <div class="info-label">고도 (m)</div>
+          <input id="gwRegAlt" placeholder="78" inputmode="decimal"
+                 style="width:100%;padding:8px;border:1.5px solid #e2e8f0;border-radius:4px;font-family:monospace;font-size:13px;">
+        </div>
+      </div>
+      <p style="font-size:11px;color:#999;margin:0 0 14px;">
+        좌표는 선택입니다. 넣으면 지도에 표시됩니다. GPS가 달린 게이트웨이는
+        비워두면 장비가 보고하는 실측 위치가 쓰입니다.
+      </p>
+
+      <p id="gwRegMsg" style="font-size:13px;margin:0 0 12px;display:none;"></p>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button onclick="closeGwRegister()" style="padding:9px 18px;background:#f1f5f9;color:#475569;border:1.5px solid #cbd5e1;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">취소</button>
+        <button id="gwRegBtn" onclick="submitGwRegister(this)" style="padding:9px 18px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">등록</button>
       </div>
     </div>
   </div>
@@ -924,6 +985,55 @@
     // ===== 게이트웨이 지도 =====
     let _gwMap = null;
     let _gwMarkers = [];
+
+    function openGwRegister() {
+      document.getElementById('gwRegMsg').style.display = 'none';
+      document.getElementById('gwRegModal').classList.add('show');
+      document.getElementById('gwRegEui').focus();
+    }
+
+    function closeGwRegister() {
+      document.getElementById('gwRegModal').classList.remove('show');
+    }
+
+    async function submitGwRegister(btn) {
+      const msg = document.getElementById('gwRegMsg');
+      const val = id => document.getElementById(id).value.trim();
+
+      const body = {
+        gateway_id: val('gwRegEui'),
+        name: val('gwRegName'),
+        description: val('gwRegDesc'),
+        latitude: val('gwRegLat'),
+        longitude: val('gwRegLon'),
+        altitude: val('gwRegAlt')
+      };
+
+      msg.style.display = 'block';
+      msg.style.color = '#666';
+      msg.textContent = '등록 중…';
+      btn.disabled = true;
+      try {
+        const r = await fetch('/api/register-gateway', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body)
+        });
+        const d = await r.json();
+        if (d.error) throw new Error(d.error);
+        msg.style.color = '#28a745';
+        msg.textContent = `등록 완료: ${d.name} (${d.gateway_id}) — ${d.note || ''}`;
+        ['gwRegEui','gwRegName','gwRegDesc','gwRegLat','gwRegLon','gwRegAlt']
+          .forEach(i => document.getElementById(i).value = '');
+        refreshGateways();
+        setTimeout(closeGwRegister, 2500);
+      } catch (e) {
+        msg.style.color = '#dc3545';
+        msg.textContent = e.message;
+      } finally {
+        btn.disabled = false;
+      }
+    }
 
     function openGwMap() {
       const modal = document.getElementById('gwMapModal');

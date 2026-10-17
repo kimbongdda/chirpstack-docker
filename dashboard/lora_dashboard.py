@@ -12,7 +12,7 @@ from datetime import datetime, timezone, timedelta
 KST = timezone(timedelta(hours=9))
 
 import grpc
-from chirpstack_api import api
+from chirpstack_api import api, common
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template
 from paho.mqtt import client as mqtt_client
@@ -1456,6 +1456,94 @@ def _get_tenant_id():
     raise RuntimeError("테넌트를 찾을 수 없음")
 
 
+@app.route("/api/register-gateway", methods=["POST"])
+def api_register_gateway():
+    """게이트웨이를 ChirpStack 에 등록한다 (gRPC GatewayService.Create).
+
+    등록하지 않은 게이트웨이의 업링크는 ChirpStack 이 버린다. 현장에 장비를
+    설치하면서 ChirpStack UI 에 따로 들어가지 않아도 되게 하는 것이 목적이다.
+    """
+    from flask import request as flask_request
+
+    data = flask_request.get_json(silent=True) or {}
+    gw_id = (data.get("gateway_id") or "").strip().lower().replace(":", "").replace("-", "")
+    name = (data.get("name") or "").strip()
+
+    # EUI-64 = 16자 hex. 틀린 값을 넣으면 ChirpStack 이 거부하므로 먼저 걸러낸다.
+    if len(gw_id) != 16 or any(c not in "0123456789abcdef" for c in gw_id):
+        return jsonify({"error": "Gateway EUI는 16자 hex 여야 합니다"}), 400
+    if not name:
+        return jsonify({"error": "이름을 입력하세요"}), 400
+
+    try:
+        gw_client = api.GatewayServiceStub(_grpc_channel)
+        req = api.CreateGatewayRequest()
+        req.gateway.gateway_id = gw_id
+        req.gateway.name = name
+        req.gateway.description = (data.get("description") or "").strip()
+        req.gateway.tenant_id = data.get("tenant_id") or _get_tenant_id()
+
+        # stats_interval: 게이트웨이가 상태를 보고하는 주기(초). 0 이면 기본값.
+        try:
+            si = int(data.get("stats_interval") or 30)
+            req.gateway.stats_interval = max(0, min(3600, si))
+        except (TypeError, ValueError):
+            req.gateway.stats_interval = 30
+
+        # 좌표는 선택. 넣으면 지도에 표시된다.
+        lat, lon = data.get("latitude"), data.get("longitude")
+        if lat not in (None, "") and lon not in (None, ""):
+            try:
+                req.gateway.location.latitude = float(lat)
+                req.gateway.location.longitude = float(lon)
+                req.gateway.location.altitude = float(data.get("altitude") or 0)
+                req.gateway.location.source = common.LocationSource.CONFIG
+            except (TypeError, ValueError):
+                return jsonify({"error": "좌표 형식이 올바르지 않습니다"}), 400
+
+        # 게이트웨이 조작은 관리자 권한이 필요하다. 테넌트 토큰으로는
+        # 삭제가 UNAUTHENTICATED 로 거부된다 (목록 조회 스레드도 admin 사용).
+        gw_client.Create(req, metadata=_admin_metadata)
+        print(f"[GW] 등록 완료: {gw_id} ({name})", flush=True)
+        # 게이트웨이 목록은 별도 스레드가 30초 주기로 갱신한다(chirpstack_gateways).
+        # 즉시 반영되지는 않으므로 UI 에서 그 점을 알려준다.
+        return jsonify({"success": True, "gateway_id": gw_id, "name": name,
+                        "note": "게이트웨이 목록은 최대 30초 후 반영됩니다"})
+
+    except grpc.RpcError as e:
+        detail = e.details() or str(e)
+        # ChirpStack 은 중복 등록을 ALREADY_EXISTS 로 주지 않고 DB 제약 위반
+        # 메시지를 그대로 올려보낸다. 원시 PostgreSQL 오류를 화면에 노출하지
+        # 않도록 코드가 아니라 메시지 내용으로 판정한다.
+        low = detail.lower()
+        if "duplicate key" in low or "already exists" in low \
+                or e.code() == grpc.StatusCode.ALREADY_EXISTS:
+            return jsonify({"error": f"이미 등록된 Gateway EUI 입니다: {gw_id}"}), 409
+        return jsonify({"error": f"ChirpStack 등록 실패: {detail}"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/delete-gateway/<gateway_id>", methods=["DELETE"])
+def api_delete_gateway(gateway_id):
+    """게이트웨이 등록 해제. 수신 이력은 남고, 이후 업링크는 버려진다."""
+    gw_id = (gateway_id or "").strip().lower()
+    if len(gw_id) != 16:
+        return jsonify({"error": "Gateway EUI 형식 오류"}), 400
+    try:
+        gw_client = api.GatewayServiceStub(_grpc_channel)
+        req = api.DeleteGatewayRequest()
+        req.gateway_id = gw_id
+        gw_client.Delete(req, metadata=_admin_metadata)
+        chirpstack_gateways.pop(gw_id, None)     # 목록에서 바로 치운다
+        print(f"[GW] 등록 해제: {gw_id}", flush=True)
+        return jsonify({"success": True, "gateway_id": gw_id})
+    except grpc.RpcError as e:
+        return jsonify({"error": f"삭제 실패: {e.details() or e}"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/applications")
 def api_applications():
     try:
@@ -1684,6 +1772,95 @@ def api_clear_node_events(dev_eui):
         _summary_cache["data"] = None
         print(f"[NODE] 패킷 삭제 완료: {dev_eui}")
         return jsonify({"success": True, "dev_eui": dev_eui})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/export-events")
+def api_export_events():
+    """수신 패킷 이력을 CSV 로 내보낸다. 초기화 전 보존용."""
+    import csv
+    import io as _io
+    from flask import Response, request as flask_request
+
+    dev_eui = flask_request.args.get("dev_eui")
+    sql = "SELECT * FROM uplink_events"
+    args = ()
+    if dev_eui:
+        sql += " WHERE dev_eui = ?"
+        args = (dev_eui,)
+    sql += " ORDER BY id"
+
+    try:
+        with get_db() as conn:
+            rows = conn.execute(sql, args).fetchall()
+    except sqlite3.Error as e:
+        return jsonify({"error": f"조회 실패: {e}"}), 500
+
+    buf = _io.StringIO()
+    if rows:
+        cols = list(rows[0].keys())
+        w = csv.writer(buf, lineterminator="\n")
+        w.writerow(cols)
+        for r in rows:
+            w.writerow([r[c] for c in cols])
+    else:
+        buf.write("(기록 없음)\n")
+
+    stamp = datetime.now(KST).strftime("%Y%m%d-%H%M")
+    name = f"uplink_{dev_eui}_{stamp}.csv" if dev_eui else f"uplink_all_{stamp}.csv"
+    # UTF-8 BOM: 엑셀에서 한글 컬럼이 깨지지 않게
+    return Response("﻿" + buf.getvalue(),
+                    mimetype="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.route("/api/clear-all-events", methods=["POST"])
+def api_clear_all_events():
+    """수신 패킷 이력 전체 초기화.
+
+    노드별 삭제(/api/clear-node-events)와 달리 전체를 비운다.
+
+    DB 만 지우면 안 된다. 이 프로세스가 메모리에 들고 있는 상태(최근 이벤트 큐,
+    fcnt 추적, 게이트웨이 맵, 요약 캐시)가 남아 화면에는 계속 옛 패킷이 보이고
+    충돌 감지도 옛 fcnt 기준으로 오판한다. 반드시 같이 비운다.
+
+    node_history_state 의 fcnt 기준선도 지운다. 패킷을 다 비운 뒤 옛 기준선을
+    그대로 두면 프레임 카운터가 음수로 정규화되어 충돌 감지가 망가진다.
+    """
+    global events, last_fcnt, missed_frames, fcnt_gateway_map, fcnt_gateway_map_keys
+
+    from flask import request as flask_request
+    body = flask_request.get_json(silent=True) or {}
+    if body.get("confirm") is not True:
+        return jsonify({"error": "confirm=true 필요"}), 400
+
+    keep_fcnt = bool(body.get("keep_fcnt_base"))
+
+    try:
+        with _db_lock:
+            with get_db() as conn:
+                before = conn.execute("SELECT COUNT(*) FROM uplink_events").fetchone()[0]
+                conn.execute("DELETE FROM uplink_events")
+                conn.execute("DELETE FROM sqlite_sequence WHERE name='uplink_events'")
+                if not keep_fcnt:
+                    conn.execute("DELETE FROM node_history_state")
+                conn.commit()
+            # VACUUM 은 트랜잭션 밖에서 (43MB -> 회수)
+            with get_db() as conn:
+                conn.execute("VACUUM")
+
+            events = deque(maxlen=MAX_EVENTS)
+            last_fcnt.clear()
+            missed_frames.clear()
+            fcnt_gateway_map.clear()
+            fcnt_gateway_map_keys = deque(maxlen=_FCNT_MAP_MAXSIZE)
+
+        _summary_cache["data"] = None
+        print(f"[RESET] 수신 패킷 이력 전체 삭제: {before}행"
+              + ("" if keep_fcnt else " + fcnt 기준선"), flush=True)
+        return jsonify({"success": True, "deleted": before,
+                        "fcnt_base_cleared": not keep_fcnt})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

@@ -41,6 +41,15 @@
                    text-decoration: none; display: inline-flex; align-items: center;
                    padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; }
 
+    .btn-tool    { background: #fff; color: #334155; border: 1.5px solid #cbd5e1;
+                   text-decoration: none; display: inline-flex; align-items: center;
+                   padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 600;
+                   cursor: pointer; font-family: inherit; }
+    .btn-tool:hover { background: #f8fafc; }
+    .btn-tool.danger { color: #c62828; border-color: #e2a8a6; }
+    .btn-tool.danger:hover { background: #fff5f5; }
+    .btn-tool:disabled { opacity: .5; cursor: default; }
+
     /* 통계 바 */
     .stats-bar {
       display: flex; gap: 20px; flex-wrap: wrap;
@@ -85,8 +94,26 @@
     <h1>수신 기록</h1>
     <div style="display:flex;gap:10px;">
       <a href="/" class="btn-back">← 대시보드</a>
+      <a href="/probe" class="btn-back">📡 지연 측정</a>
       <a href="/nodes" class="btn-back">노드 관리</a>
     </div>
+  </div>
+
+  <!-- 기록 관리 -->
+  <div class="section" style="padding:14px 20px;">
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
+      <span style="font-size:12px;font-weight:600;color:#64748b;margin-right:4px;">기록 관리</span>
+      <a class="btn-tool" href="/api/export-events">⬇ 수신 패킷 CSV</a>
+      <span style="flex:1"></span>
+      <button class="btn-tool danger" onclick="clearAllEvents(this)">수신 기록 전체 초기화</button>
+    </div>
+    <p id="clearMsg" style="font-size:12.5px;color:#64748b;margin-top:10px;display:none;"></p>
+    <p style="font-size:11px;color:#94a3b8;margin-top:8px;line-height:1.7;">
+      <code>uplink_events</code> 전체와 노드별 <b>프레임 카운터 기준선</b>을 함께 지웁니다.
+      기준선을 남기면 카운터가 음수로 정규화되어 충돌 감지가 망가집니다.
+      개별 노드만 지우려면 <a href="/nodes" style="color:#667eea;">노드 관리</a>에서 하세요.
+      <b>지우기 전에 CSV를 내려받아 두세요.</b>
+    </p>
   </div>
 
   <!-- 날짜별 통계 -->
@@ -172,6 +199,39 @@
   <script>
     let currentPage = 1;
     let dailyChart = null;
+
+    async function clearAllEvents(btn) {
+      const msg = document.getElementById('clearMsg');
+
+      // 되돌릴 수 없으므로 두 번 확인한다
+      if (!confirm('수신 패킷 이력을 전부 지웁니다.\n\n'
+                 + '· uplink_events 전체\n· 노드별 프레임 카운터 기준선\n\n'
+                 + '되돌릴 수 없습니다. CSV를 내려받으셨습니까?')) return;
+      if (!confirm('마지막 확인입니다. 정말 전체 초기화합니까?')) return;
+
+      btn.disabled = true;
+      msg.style.display = 'block';
+      msg.style.color = '#64748b';
+      msg.textContent = '초기화 중… (기록이 많으면 수십 초 걸립니다)';
+      try {
+        const r = await fetch('/api/clear-all-events', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({confirm: true})
+        });
+        const d = await r.json();
+        if (d.error) throw new Error(d.error);
+        msg.style.color = '#2e7d32';
+        msg.textContent = `완료: ${d.deleted.toLocaleString()}행 삭제`
+                        + (d.fcnt_base_cleared ? ' · fcnt 기준선 초기화' : '');
+        setTimeout(() => location.reload(), 1200);
+      } catch (e) {
+        msg.style.color = '#c62828';
+        msg.textContent = '초기화 실패: ' + e.message;
+      } finally {
+        btn.disabled = false;
+      }
+    }
 
     // ===== 디바이스 목록 로드 =====
     fetch('/api/history/devices')
