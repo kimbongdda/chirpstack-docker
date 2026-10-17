@@ -1,0 +1,11 @@
+[Unit]
+Description=ntpq -pn snapshot every 10 minutes
+
+[Timer]
+OnBootSec=2min
+OnCalendar=*:0/10
+AccuracySec=10s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

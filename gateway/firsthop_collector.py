@@ -8,7 +8,13 @@ lora-probe 는 게이트웨이 -> 서버 전 구간(WiFi + Starlink + 인터넷 
 본다. 여기서는 그 앞쪽 두 구간을 따로 잰다.
 
   1. router_ping : 기본 게이트웨이(공유기)까지 1초 ping  -> WiFi 구간
-  2. dish_*      : Starlink 접시 gRPC (192.168.100.1:9200) -> 위성 구간
+  2. hop_ping    : 위성 너머 첫 응답 홉까지 10 Hz (TTL 제한 ICMP) -> WiFi + 위성 구간
+       위성 다음 홉인 100.64.0.1 은 Tailscale 방화벽(ts-input: 100.64.0.0/10 이 tailscale0
+       밖에서 오면 DROP)에 응답이 막혀 못 쓴다. 그래서 1.1.1.1 로 TTL=3 패킷을 보내고 돌아오는
+       Time Exceeded(현재 172.16.251.56, Starlink 측)로 지연을 잰다. 오버레이를 타지 않도록
+       기본 경로 인터페이스(wlan0)에 묶는다. 라우터가 ICMP 생성 속도를 제한하면 유실처럼
+       보일 수 있으니, 단발 유실보다 연속 유실 구간을 볼 것.
+  3. dish_*      : Starlink 접시 gRPC (192.168.100.1:9200) -> 위성 구간
        - dish_history : 접시가 1초마다 남기는 PoP ping 지연·드롭률 (최근 900초 링버퍼)
        - dish_event   : 접시가 판정한 끊김 원인 (NO_DOWNLINK, OBSTRUCTED, ...)
        - dish_status  : 10초마다 상태 스냅샷 (가림률, 접시 가동시간 등)
@@ -23,7 +29,9 @@ import json
 import os
 import queue
 import re
+import socket
 import sqlite3
+import struct
 import subprocess
 import sys
 import threading
@@ -34,6 +42,10 @@ GRPCURL = os.getenv("FIRSTHOP_GRPCURL", "/usr/local/bin/grpcurl")
 DISH = os.getenv("FIRSTHOP_DISH", "192.168.100.1:9200")
 HISTORY_EVERY = float(os.getenv("FIRSTHOP_HISTORY_EVERY", "60"))   # 링버퍼가 900초라 넉넉함
 STATUS_EVERY = float(os.getenv("FIRSTHOP_STATUS_EVERY", "10"))
+HOP_TARGET = os.getenv("FIRSTHOP_HOP_TARGET", "1.1.1.1")
+HOP_TTL = int(os.getenv("FIRSTHOP_HOP_TTL", "3"))
+HOP_HZ = float(os.getenv("FIRSTHOP_HOP_HZ", "10"))
+HOP_TIMEOUT = 1.0
 
 # 접시 history 의 outages 는 GPS 시각이라 쓰지 않고, eventLog(유닉스 ns)를 쓴다.
 RING = 900
@@ -45,6 +57,11 @@ SCHEMA = [
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         t_ns INTEGER, target TEXT, seq INTEGER, rtt_ms REAL, lost INTEGER)""",
     "CREATE INDEX IF NOT EXISTS ix_router_t ON router_ping(t_ns)",
+    """CREATE TABLE IF NOT EXISTS hop_ping(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        t_ns INTEGER, iface TEXT, ttl INTEGER, seq INTEGER,
+        responder TEXT, rtt_ms REAL, lost INTEGER)""",
+    "CREATE INDEX IF NOT EXISTS ix_hop_t ON hop_ping(t_ns)",
     # counter 는 접시 부팅 후 초 단위 일련번호. 재부팅하면 0부터 다시 세므로 boot 로 구분한다.
     """CREATE TABLE IF NOT EXISTS dish_history(
         boot INTEGER, counter INTEGER, t_ns INTEGER,
@@ -141,6 +158,111 @@ def router_pinger():
         time.sleep(1)
 
 
+# ===================== 위성 너머 첫 홉 (TTL 제한 ICMP) =====================
+
+def default_iface():
+    try:
+        out = subprocess.run(["ip", "-4", "route", "show", "default"],
+                             capture_output=True, text=True, timeout=5).stdout.split()
+        return out[out.index("dev") + 1]
+    except (ValueError, IndexError, OSError, subprocess.SubprocessError):
+        return None
+
+
+def icmp_checksum(b):
+    if len(b) % 2:
+        b += b"\0"
+    s = sum(struct.unpack(f"!{len(b) // 2}H", b))
+    s = (s >> 16) + (s & 0xFFFF)
+    s += s >> 16
+    return ~s & 0xFFFF
+
+
+def hop_prober():
+    """HOP_HZ 로 TTL=HOP_TTL 에코를 보내고 Time Exceeded 응답까지의 지연을 잰다.
+
+    응답 대기는 별도 스레드가 하고, 1초 안에 안 온 seq 는 유실로 적는다.
+    10 Hz 를 행마다 커밋하면 SD 카드에 부담이라 1초 단위로 묶어 쓴다.
+    """
+    ident = os.getpid() & 0xFFFF
+    pending = {}                       # seq -> (t_ns, mono, iface)
+    lock = threading.Lock()
+    batch = []
+
+    def receiver(sock):
+        while True:
+            try:
+                data, addr = sock.recvfrom(1500)
+            except OSError:
+                return                 # 인터페이스가 바뀌어 소켓을 닫았다
+            mono = time.monotonic()
+            ihl = (data[0] & 0x0F) * 4
+            typ = data[ihl]
+            if typ == 11:              # Time Exceeded: 원래 보낸 IP+ICMP 헤더가 안에 들어 있다
+                inner = data[ihl + 8:]
+                iihl = (inner[0] & 0x0F) * 4
+                icmp = inner[iihl:iihl + 8]
+            elif typ == 0:             # TTL 이 충분하면 목적지가 직접 답한다
+                icmp = data[ihl:ihl + 8]
+            else:
+                continue
+            if len(icmp) < 8:
+                continue
+            rid, rseq = struct.unpack("!HH", icmp[4:8])
+            if rid != ident:
+                continue
+            with lock:
+                p = pending.pop(rseq, None)
+                if p:
+                    batch.append((p[0], p[2], HOP_TTL, rseq, addr[0],
+                                  round((mono - p[1]) * 1000, 3), 0))
+
+    while True:
+        iface = default_iface()
+        if not iface:
+            time.sleep(1)
+            continue
+        sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, iface.encode() + b"\0")
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_TTL, HOP_TTL)
+        threading.Thread(target=receiver, args=(sock,), daemon=True).start()
+        print(f"[firsthop] hop ping -> {HOP_TARGET} ttl={HOP_TTL} via {iface} at {HOP_HZ} Hz", flush=True)
+
+        seq = 0
+        next_send = time.monotonic()
+        last_flush = last_check = time.monotonic()
+        while True:
+            seq = (seq + 1) & 0xFFFF
+            hdr = struct.pack("!BBHHH", 8, 0, 0, ident, seq)
+            payload = b"firsthop" * 2
+            hdr = struct.pack("!BBHHH", 8, 0, icmp_checksum(hdr + payload), ident, seq)
+            with lock:
+                pending[seq] = (time.time_ns(), time.monotonic(), iface)
+            try:
+                sock.sendto(hdr + payload, (HOP_TARGET, 0))
+            except OSError:
+                pass                   # 망이 없으면 응답이 안 와서 유실로 남는다
+
+            now = time.monotonic()
+            with lock:
+                for s, p in list(pending.items()):
+                    if now - p[1] > HOP_TIMEOUT:
+                        del pending[s]
+                        batch.append((p[0], p[2], HOP_TTL, s, None, None, 1))
+                if now - last_flush >= 1 and batch:
+                    put("INSERT INTO hop_ping(t_ns,iface,ttl,seq,responder,rtt_ms,lost)"
+                        " VALUES(?,?,?,?,?,?,?)", sorted(batch))
+                    batch.clear()
+                    last_flush = now
+            if now - last_check > 10:
+                last_check = now
+                if default_iface() != iface:
+                    break
+            next_send += 1.0 / HOP_HZ
+            time.sleep(max(0.0, next_send - time.monotonic()))
+        sock.close()
+
+
 # ===================== Starlink 접시 =====================
 
 def dish_call(req):
@@ -218,7 +340,7 @@ def dish_status_poller():
 def main():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     threading.Thread(target=writer, daemon=True).start()
-    for fn in (router_pinger, dish_history_poller, dish_status_poller):
+    for fn in (router_pinger, hop_prober, dish_history_poller, dish_status_poller):
         threading.Thread(target=fn, daemon=True).start()
     print(f"[firsthop] -> {DB_PATH} (dish {DISH}, history {HISTORY_EVERY}s, status {STATUS_EVERY}s)",
           flush=True)

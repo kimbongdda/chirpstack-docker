@@ -1,0 +1,8 @@
+[Unit]
+Description=Append ntpq -pn snapshot for latency analysis (clock quality record)
+
+[Service]
+Type=oneshot
+# 프로브 t1/t4 는 게이트웨이 벽시계라, 시계 품질을 같이 남겨 둬야 오프셋을 해석할 수 있다
+ExecStart=/bin/sh -c 'mkdir -p /var/lib/lora-probe && { echo "=== $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="; /usr/bin/ntpq -pn 2>&1; } >> /var/lib/lora-probe/ntpq.log'
+Nice=10
