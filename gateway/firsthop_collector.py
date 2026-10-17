@@ -14,7 +14,11 @@ lora-probe 는 게이트웨이 -> 서버 전 구간(WiFi + Starlink + 인터넷 
        Time Exceeded(현재 172.16.251.56, Starlink 측)로 지연을 잰다. 오버레이를 타지 않도록
        기본 경로 인터페이스(wlan0)에 묶는다. 라우터가 ICMP 생성 속도를 제한하면 유실처럼
        보일 수 있으니, 단발 유실보다 연속 유실 구간을 볼 것.
-  3. dish_*      : Starlink 접시 gRPC (192.168.100.1:9200) -> 위성 구간
+  3. ts_path     : Tailscale 서버 피어 경로 1초 기록 (tailscaled 로컬 API)
+       direct 이면 CurAddr 가 채워지고, 비면 DERP(TCP) 경유. Relay 는 direct 일 때도 홈 DERP
+       이름이 들어 있으므로 경로 판정에 쓰면 안 된다. Tx/Rx 바이트를 같이 남겨, CurAddr 가 빈
+       동안 Tx 가 늘면 그 패킷이 DERP 로 나갔다는 직접 증거가 된다.
+  4. dish_*      : Starlink 접시 gRPC (192.168.100.1:9200) -> 위성 구간
        - dish_history : 접시가 1초마다 남기는 PoP ping 지연·드롭률 (최근 900초 링버퍼)
        - dish_event   : 접시가 판정한 끊김 원인 (NO_DOWNLINK, OBSTRUCTED, ...)
        - dish_status  : 10초마다 상태 스냅샷 (가림률, 접시 가동시간 등)
@@ -25,6 +29,7 @@ lora-probe 는 게이트웨이 -> 서버 전 구간(WiFi + Starlink + 인터넷 
 접시 gRPC 는 grpcurl 로 부른다 (/usr/local/bin/grpcurl, fullstorydev/grpcurl 릴리스).
 python grpcio 는 bullseye 에 reflection 지원이 없어 쓰지 않는다.
 """
+import http.client
 import json
 import os
 import queue
@@ -46,6 +51,8 @@ HOP_TARGET = os.getenv("FIRSTHOP_HOP_TARGET", "1.1.1.1")
 HOP_TTL = int(os.getenv("FIRSTHOP_HOP_TTL", "3"))
 HOP_HZ = float(os.getenv("FIRSTHOP_HOP_HZ", "10"))
 HOP_TIMEOUT = 1.0
+TS_SOCK = os.getenv("FIRSTHOP_TS_SOCK", "/var/run/tailscale/tailscaled.sock")
+TS_PEER_IP = os.getenv("FIRSTHOP_TS_PEER", "100.84.186.95")       # 서버 노드는 Tailscale IP 로 식별
 
 # 접시 history 의 outages 는 GPS 시각이라 쓰지 않고, eventLog(유닉스 ns)를 쓴다.
 RING = 900
@@ -62,6 +69,9 @@ SCHEMA = [
         t_ns INTEGER, iface TEXT, ttl INTEGER, seq INTEGER,
         responder TEXT, rtt_ms REAL, lost INTEGER)""",
     "CREATE INDEX IF NOT EXISTS ix_hop_t ON hop_ping(t_ns)",
+    """CREATE TABLE IF NOT EXISTS ts_path(
+        t_ns INTEGER PRIMARY KEY, cur_addr TEXT, relay TEXT, peer_relay TEXT,
+        rx_bytes INTEGER, tx_bytes INTEGER, last_handshake TEXT, online INTEGER, active INTEGER)""",
     # counter 는 접시 부팅 후 초 단위 일련번호. 재부팅하면 0부터 다시 세므로 boot 로 구분한다.
     """CREATE TABLE IF NOT EXISTS dish_history(
         boot INTEGER, counter INTEGER, t_ns INTEGER,
@@ -263,6 +273,52 @@ def hop_prober():
         sock.close()
 
 
+# ===================== Tailscale 서버 피어 경로 =====================
+
+class _UnixHTTP(http.client.HTTPConnection):
+    def __init__(self, path):
+        super().__init__("local-tailscaled.sock", timeout=3)
+        self._path = path
+
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(3)
+        self.sock.connect(self._path)
+
+
+def ts_path_poller():
+    """1초마다 tailscaled 로컬 API 로 서버 피어 상태를 읽는다.
+
+    `tailscale status --json` 을 매초 띄우면 무거우므로 소켓으로 직접 묻는다 (수 ms).
+    매초 커밋하지 않고 10초씩 묶어 쓴다.
+    """
+    batch, last_flush, warned = [], time.monotonic(), False
+    next_t = time.monotonic()
+    while True:
+        try:
+            c = _UnixHTTP(TS_SOCK)
+            c.request("GET", "/localapi/v0/status?peers=true")
+            st = json.loads(c.getresponse().read())
+            c.close()
+            for p in (st.get("Peer") or {}).values():
+                if TS_PEER_IP in (p.get("TailscaleIPs") or []):
+                    batch.append((time.time_ns(), p.get("CurAddr") or "", p.get("Relay") or "",
+                                  p.get("PeerRelay") or "", p.get("RxBytes"), p.get("TxBytes"),
+                                  p.get("LastHandshake"), int(bool(p.get("Online"))),
+                                  int(bool(p.get("Active")))))
+                    break
+            warned = False
+        except (OSError, ValueError, http.client.HTTPException) as e:
+            if not warned:
+                print(f"[firsthop] tailscaled 로컬 API 실패: {e}", flush=True)
+                warned = True
+        if batch and time.monotonic() - last_flush >= 10:
+            put("INSERT OR IGNORE INTO ts_path VALUES(?,?,?,?,?,?,?,?,?)", batch)
+            batch, last_flush = [], time.monotonic()
+        next_t += 1.0
+        time.sleep(max(0.0, next_t - time.monotonic()))
+
+
 # ===================== Starlink 접시 =====================
 
 def dish_call(req):
@@ -340,7 +396,7 @@ def dish_status_poller():
 def main():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     threading.Thread(target=writer, daemon=True).start()
-    for fn in (router_pinger, hop_prober, dish_history_poller, dish_status_poller):
+    for fn in (router_pinger, hop_prober, ts_path_poller, dish_history_poller, dish_status_poller):
         threading.Thread(target=fn, daemon=True).start()
     print(f"[firsthop] -> {DB_PATH} (dish {DISH}, history {HISTORY_EVERY}s, status {STATUS_EVERY}s)",
           flush=True)
