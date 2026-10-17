@@ -10,6 +10,11 @@ v2 에서 추가된 것: 서버가 응답에 실어 보내는 제어 명령(기�
 1회 실행 보장이 핵심이다. ack 패킷은 유실될 수 있으므로(이 회선 손실 3%)
 같은 cmd_id 가 여러 번 도착한다. 실행한 cmd_id 를 파일에 남겨 프로세스가
 재시작해도 중복 실행되지 않게 한다.
+
+RTC 가 없어서 부팅 직후 시계는 fake-hwclock 이 복원한 옛 시각이다. 그 시각으로 run 을
+정하면 run 이 실제 시작 시각과 수 주씩 어긋나므로, systemd 쪽에서 NTP 동기화를 기다린 뒤
+시작하고(lora-probe.service.d/time-sync.conf), 그래도 실행 중에 시계가 점프하면
+새 run 으로 넘어간다.
 """
 import json
 import os
@@ -31,6 +36,10 @@ TSRC     = os.getenv("PROBE_TSRC", "sys")         # PPS 없음 -> sys
 
 # 연속으로 이만큼 실패하면 소켓을 다시 만든다 (회선 전환 시 소켓 고정 대응)
 RECREATE_AFTER_LOSSES = int(os.getenv("PROBE_RECREATE_AFTER", "3"))
+
+# 벽시계가 단조시계 대비 이만큼(초) 넘게 튀면 NTP 스텝으로 보고 새 run 을 시작한다.
+# ntpd 는 128ms 넘는 오차를 스텝으로 고치므로 그보다 넉넉하게 잡는다.
+STEP_THRESHOLD_NS = int(float(os.getenv("PROBE_STEP_THRESHOLD", "1.0")) * 1e9)
 
 logq  = queue.Queue(maxsize=200000)
 _path = {"path": "unknown", "relay": ""}
@@ -154,6 +163,16 @@ def writer():
                     buf = buf[-20000:]
 
 
+def clock_synced():
+    """커널 시계가 NTP 동기 상태인지. 확인할 수 없으면 None."""
+    try:
+        out = subprocess.run(["timedatectl", "show", "-p", "NTPSynchronized", "--value"],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+        return {"yes": True, "no": False}.get(out)
+    except Exception:
+        return None
+
+
 def new_socket():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.settimeout(TIMEOUT)
@@ -174,12 +193,26 @@ def main():
     seq = 0
     last_cmd_id = load_last_cmd()
     consecutive_losses = 0
+    wall_minus_mono = time.time_ns() - time.monotonic_ns()
     s = new_socket()
+    synced = clock_synced()
     print(f"[probe] run={run} -> {SERVER} every {INTERVAL}s "
-          f"(last_cmd_id={last_cmd_id or 'none'})", flush=True)
+          f"(last_cmd_id={last_cmd_id or 'none'})"
+          + ("" if synced is not False else " (경고: 시계 미동기 상태로 시작)"), flush=True)
 
     while True:
         cycle_start = time.perf_counter()
+
+        # 시계 스텝 감지. 스텝 전후 t1 이 같은 run 에 섞이면 시각이 이어지지 않으므로 run 을 끊는다.
+        d = time.time_ns() - time.monotonic_ns()
+        if abs(d - wall_minus_mono) > STEP_THRESHOLD_NS:
+            old = run
+            run = int(time.time())
+            seq = 0
+            print(f"[probe] 시계 스텝 {(d - wall_minus_mono) / 1e9:+.1f}s 감지"
+                  f" — run {old} -> {run}", flush=True)
+        wall_minus_mono = d
+
         seq += 1
         p, r = _path["path"], _path["relay"]
         req = {"v": 2, "typ": "req", "run": run, "seq": seq, "src": NODE,
