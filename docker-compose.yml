@@ -90,8 +90,12 @@ services:
     volumes:
       - dashboarddata:/app/data
       # 지연 측정 프로브 DB (probe/probe_server.py 가 호스트에서 기록).
-      # 대시보드는 읽기만 하므로 read-only 로 붙인다.
-      - ./probe/data:/app/probe:ro
+      #
+      # 조회는 read-only 커넥션으로 하지만, 대시보드에서 기록 초기화를 하려면
+      # 마운트 자체는 쓰기 가능해야 한다. 초기화는 DELETE + VACUUM 으로 수행하며
+      # (파일을 지우면 호스트 로거의 핸들이 끊긴다), 로거 쪽은 busy_timeout 과
+      # 재시도로 그 순간의 쓰기 잠금을 견딘다.
+      - ./probe/data:/app/probe
     depends_on:
       - mosquitto
       - chirpstack

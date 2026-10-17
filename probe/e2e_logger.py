@@ -45,8 +45,13 @@ logq = queue.Queue(maxsize=200000)
 
 
 def writer():
-    """디스크 I/O 를 수신 경로에서 분리한다 (수신 타임스탬프 오염 방지)."""
-    con = sqlite3.connect(DB_PATH)
+    """디스크 I/O 를 수신 경로에서 분리한다 (수신 타임스탬프 오염 방지).
+
+    대시보드의 기록 초기화(DELETE + VACUUM)가 걸리면 쓰기 잠금이 생긴다.
+    timeout 과 재시도가 없으면 이 스레드가 죽어 수집이 조용히 멈춘다.
+    """
+    con = sqlite3.connect(DB_PATH, timeout=30)
+    con.execute("PRAGMA busy_timeout=30000")
     con.execute("""CREATE TABLE IF NOT EXISTS e2e(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         recv_ns INTEGER,        -- 서버(호스트) 수신 시각
@@ -76,12 +81,23 @@ def writer():
     while True:
         buf.append(logq.get())
         if len(buf) >= 20 or logq.empty():
-            con.executemany(
-                "INSERT INTO e2e(recv_ns,gw_time_ns,raw_ms,gateway_id,freq_hz,"
-                "sf,bw_hz,rssi,snr,crc_ok,size,tmst,toa_ms,region)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", buf)
-            con.commit()
-            buf.clear()
+            try:
+                con.executemany(
+                    "INSERT INTO e2e(recv_ns,gw_time_ns,raw_ms,gateway_id,freq_hz,"
+                    "sf,bw_hz,rssi,snr,crc_ok,size,tmst,toa_ms,region)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", buf)
+                con.commit()
+                buf.clear()
+            except sqlite3.Error as e:
+                # 버퍼를 비우지 않고 다음 주기에 재시도한다
+                print(f"[e2e] write retry: {e}", flush=True)
+                try:
+                    con.rollback()
+                except sqlite3.Error:
+                    pass
+                time.sleep(1)
+                if len(buf) > 50000:          # 무한 적체 방지
+                    buf = buf[-20000:]
 
 
 def time_on_air_ms(sf, bw_hz, payload_len, cr=1, preamble=8, crc=True, implicit=False):

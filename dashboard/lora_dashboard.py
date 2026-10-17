@@ -746,11 +746,21 @@ PROBE_STALE_SEC = 30    # 이 시간 넘게 수신 없으면 지연
 PROBE_DOWN_SEC = 90     # 이 시간 넘게 수신 없으면 끊김
 
 
-def _probe_db():
-    """쓰기 중인 DB 를 건드리지 않도록 read-only 로 연다."""
-    conn = sqlite3.connect(f"file:{PROBE_DB_PATH}?mode=ro", uri=True)
+def _probe_db_ro(path):
+    """측정 DB 를 read-only 로 연다.
+
+    호스트 로거가 쉬지 않고 쓰는 파일이므로, 대기 설정이 없으면 커밋 순간과
+    겹칠 때 'database is locked' 로 조회가 실패한다. 실제로 그 때문에 간헐적
+    500 이 발생했다. 반드시 timeout 과 busy_timeout 을 준다.
+    """
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=15)
+    conn.execute("PRAGMA busy_timeout=15000")
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _probe_db():
+    return _probe_db_ro(PROBE_DB_PATH)
 
 
 @app.route("/api/probe")
@@ -842,6 +852,164 @@ def api_probe():
             for r in recent
         ],
     })
+
+
+E2E_DB_PATH = os.getenv("E2E_DB_PATH", "/app/probe/e2e_latency.db")
+
+# 초기화·내보내기 대상. 키는 UI 가 보내는 이름.
+PROBE_DATASETS = {
+    "probe": (PROBE_DB_PATH, "probe_rx", "프로브"),
+    "e2e":   (E2E_DB_PATH,   "e2e",      "LoRa 종단"),
+}
+
+
+def _probe_db_rw(path):
+    """초기화용 쓰기 커넥션. 호스트 로거와 잠금을 다투므로 반드시 대기시킨다."""
+    conn = sqlite3.connect(path, timeout=30)
+    conn.execute("PRAGMA busy_timeout=30000")
+    return conn
+
+
+@app.route("/api/probe/export")
+def api_probe_export():
+    """측정 기록을 CSV 로 내보낸다. 분석·논문용 원자료 추출."""
+    import csv
+    import io as _io
+    from flask import Response, request as flask_request
+
+    kind = flask_request.args.get("kind", "probe")
+    if kind not in PROBE_DATASETS:
+        return jsonify({"error": f"알 수 없는 대상: {kind}"}), 400
+    path, table, label = PROBE_DATASETS[kind]
+    if not os.path.exists(path):
+        return jsonify({"error": f"{label} DB 없음"}), 404
+
+    try:
+        conn = _probe_db_ro(path)
+        try:
+            rows = conn.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        return jsonify({"error": f"조회 실패: {e}"}), 500
+
+    buf = _io.StringIO()
+    if rows:
+        cols = list(rows[0].keys())
+        w = csv.writer(buf, lineterminator="\n")
+        w.writerow(cols)
+        for r in rows:
+            w.writerow([r[c] for c in cols])
+    else:
+        buf.write("(기록 없음)\n")
+
+    stamp = datetime.now(KST).strftime("%Y%m%d-%H%M")
+    # UTF-8 BOM: 엑셀에서 한글 컬럼이 깨지지 않게
+    return Response(
+        "﻿" + buf.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={"Content-Disposition":
+                 f'attachment; filename="{kind}_{stamp}.csv"'},
+    )
+
+
+@app.route("/api/probe/reset", methods=["POST"])
+def api_probe_reset():
+    """측정 기록을 초기화한다.
+
+    파일을 지우지 않고 DELETE + VACUUM 으로 비운다. 호스트 로거가 파일을 열어둔
+    상태이므로 파일을 지우면 로거의 핸들이 끊긴 채 살아 있어 기록이 조용히
+    멈춘다. 테이블만 비우면 로거는 그대로 다음 행부터 이어 쓴다.
+
+    실수 방지를 위해 본문에 confirm=true 를 요구한다.
+    """
+    from flask import request as flask_request
+
+    body = flask_request.get_json(silent=True) or {}
+    if body.get("confirm") is not True:
+        return jsonify({"error": "confirm=true 필요"}), 400
+
+    targets = body.get("targets") or ["probe", "e2e"]
+    bad = [t for t in targets if t not in PROBE_DATASETS and t != "gateway"]
+    if bad:
+        return jsonify({"error": f"알 수 없는 대상: {bad}"}), 400
+
+    result = {}
+
+    # 게이트웨이 초기화는 직접 지울 수 없으므로, 프로브 응답 채널에 명령을
+    # 올려둔다. 응답기가 이를 실어 보내고 게이트웨이가 ack 하면 해제된다.
+    # (규격: docs/latency-probe/protocol.md v2)
+    if "gateway" in targets:
+        import uuid
+        src = body.get("gateway_src", "rak7248-gw")
+        try:
+            conn = _probe_db_rw(PROBE_DB_PATH)
+            conn.execute("""CREATE TABLE IF NOT EXISTS pending_cmd(
+                src TEXT PRIMARY KEY, cmd TEXT, cmd_id TEXT,
+                created_ns INTEGER, acked_ns INTEGER)""")
+            cmd_id = uuid.uuid4().hex[:16]
+            conn.execute(
+                "INSERT OR REPLACE INTO pending_cmd(src,cmd,cmd_id,created_ns,acked_ns)"
+                " VALUES(?,?,?,?,NULL)",
+                (src, "reset", cmd_id, int(datetime.now(KST).timestamp() * 1e9)))
+            conn.commit()
+            conn.close()
+            result["gateway"] = {"ok": True, "queued": True, "cmd_id": cmd_id,
+                                 "label": "게이트웨이", "src": src}
+            print(f"[reset] 게이트웨이 초기화 명령 등록: {src} / {cmd_id}", flush=True)
+        except sqlite3.Error as e:
+            result["gateway"] = {"ok": False, "reason": str(e)}
+
+    for kind in [t for t in targets if t != "gateway"]:
+        path, table, label = PROBE_DATASETS[kind]
+        if not os.path.exists(path):
+            result[kind] = {"ok": False, "reason": "DB 없음"}
+            continue
+        try:
+            conn = _probe_db_rw(path)
+            before = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            conn.execute(f"DELETE FROM {table}")
+            # id 를 1부터 다시 시작시킨다 (AUTOINCREMENT 는 별도 테이블에 기록됨)
+            conn.execute("DELETE FROM sqlite_sequence WHERE name = ?", (table,))
+            conn.commit()
+            conn.execute("VACUUM")           # 파일 크기 회수
+            conn.close()
+            result[kind] = {"ok": True, "deleted": before, "label": label}
+            print(f"[reset] {label}: {before}행 삭제", flush=True)
+        except sqlite3.Error as e:
+            result[kind] = {"ok": False, "reason": str(e)}
+
+    return jsonify({"results": result})
+
+
+@app.route("/api/probe/cmd-status")
+def api_probe_cmd_status():
+    """게이트웨이 초기화 명령의 진행 상태. 등록 -> 전달 -> ack 까지를 보여준다."""
+    if not os.path.exists(PROBE_DB_PATH):
+        return jsonify({"available": False})
+    try:
+        conn = _probe_db_ro(PROBE_DB_PATH)
+        try:
+            tbl = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='pending_cmd'"
+            ).fetchone()
+            if not tbl:
+                return jsonify({"available": True, "commands": []})
+            rows = conn.execute(
+                "SELECT src, cmd, cmd_id, created_ns, acked_ns FROM pending_cmd"
+                " ORDER BY created_ns DESC LIMIT 5").fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        return jsonify({"available": False, "reason": str(e)})
+
+    import time as _time
+    now = _time.time_ns()
+    return jsonify({"available": True, "commands": [
+        {"src": r["src"], "cmd": r["cmd"], "cmd_id": r["cmd_id"],
+         "acked": r["acked_ns"] is not None,
+         "age_sec": round((now - r["created_ns"]) / 1e9, 1) if r["created_ns"] else None}
+        for r in rows]})
 
 
 @app.route("/api/probe/outages")
