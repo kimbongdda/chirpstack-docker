@@ -9,7 +9,20 @@ import socket, json, time, sqlite3, threading, queue, os, sys
 BIND_ADDR = "0.0.0.0"
 BIND_PORT = 1800
 SRV_NAME  = "aeron-sever"
-DB_PATH   = r"C:\Users\Administrator\chirpstack-docker\probe\data\probe_server.db"
+# 라이브 DB 는 반드시 9p 마운트(probe/data) 밖에 둔다.
+#
+# probe/data 는 Docker Desktop 의 9p 공유로 컨테이너에 노출된다. 9p 는 SQLite 가
+# 의존하는 POSIX 파일 잠금을 제대로 지원하지 않고 클라이언트 캐싱을 하므로,
+# 호스트가 쓰는 동안 컨테이너가 읽으면 찢어진 페이지를 보고 "database disk image
+# is malformed" 로 실패한다. DB 가 작을 때는 우연히 통과하지만 수십 MB 가 되면
+# 재현된다(실제로 50MB 에서 발생).
+#
+# 따라서 라이브 DB 는 probe/live 에 두고, 컨테이너가 읽을 '스냅샷'만 probe/data 로
+# 원자적으로 내보낸다. 스냅샷은 아무도 동시에 쓰지 않으므로 9p 에서도 안전하다.
+DB_PATH   = r"C:\Users\Administrator\chirpstack-docker\probe\live\probe_server.db"
+SNAP_PATH = r"C:\Users\Administrator\chirpstack-docker\probe\data\probe_server.db"
+CMD_DIR   = r"C:\Users\Administrator\chirpstack-docker\probe\data\cmd"
+SNAP_SEC  = int(os.getenv("PROBE_SNAP_SEC", "20"))
 ALLOW_NET = "100."           # tailnet(100.64.0.0/10)에서 온 것만 응답
 
 logq = queue.Queue(maxsize=200000)
@@ -56,6 +69,107 @@ def cmd_poller():
         except sqlite3.Error:
             pass
         time.sleep(2)
+
+
+def snapshot_worker(db_path, snap_path, table, interval):
+    """라이브 DB 의 일관된 사본을 마운트 폴더로 원자적으로 내보낸다.
+
+    백업 API 는 쓰기가 진행되는 중에도 일관된 사본을 만든다. 임시 파일에 만든 뒤
+    os.replace 로 교체하므로, 컨테이너가 읽는 순간에 반쯤 쓰인 파일을 보는 일이 없다.
+    """
+    tmp = snap_path + ".tmp"
+    fails = 0
+    while True:
+        time.sleep(interval)
+        try:
+            os.makedirs(os.path.dirname(snap_path), exist_ok=True)
+            src = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=30)
+            dst = sqlite3.connect(tmp)
+            src.backup(dst)
+            dst.close()
+            src.close()
+            os.replace(tmp, snap_path)
+            if fails:
+                print(f"[snap] {table} 스냅샷 복구 (연속 실패 {fails}회 후)", flush=True)
+            fails = 0
+        except Exception as e:
+            fails += 1
+            # Windows 는 다른 프로세스가 열어둔 파일을 replace 할 수 없다.
+            # 대시보드가 커넥션을 닫지 않으면 여기서 영구히 막히고, 스냅샷이
+            # 조용히 낡아간다(실제로 50분간 발생). 조용히 넘기지 말고 알린다.
+            if fails == 1 or fails % 15 == 0:
+                print(f"[snap] {table} 스냅샷 실패 {fails}회 연속: "
+                      f"{type(e).__name__}: {e}", flush=True)
+                if isinstance(e, PermissionError):
+                    print("[snap]   -> 스냅샷 파일을 누가 열어두고 있다. "
+                          "대시보드의 DB 커넥션 누수를 확인할 것.", flush=True)
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+def cmd_file_worker(prefixes, handler):
+    """컨테이너가 남긴 명령 파일을 처리한다.
+
+    대시보드는 라이브 DB 에 직접 쓸 수 없다(9p 위 SQLite 쓰기는 위험).
+    대신 작은 JSON 파일을 남기고, 소유 프로세스인 여기서 실행한다.
+    일반 파일 쓰기는 9p 에서도 안전하다.
+    """
+    while True:
+        time.sleep(2)
+        try:
+            if not os.path.isdir(CMD_DIR):
+                continue
+            for fn in sorted(os.listdir(CMD_DIR)):
+                if not fn.endswith(".json") or not fn.startswith(tuple(prefixes)):
+                    continue
+                path = os.path.join(CMD_DIR, fn)
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        body = json.load(f)
+                except Exception as e:
+                    print(f"[cmd] {fn} 읽기 실패, 폐기: {e}", flush=True)
+                    os.remove(path)
+                    continue
+                try:
+                    handler(body)
+                    print(f"[cmd] {fn} 처리 완료", flush=True)
+                except Exception as e:
+                    print(f"[cmd] {fn} 처리 실패: {e}", flush=True)
+                os.remove(path)            # 성공·실패 모두 1회만 시도한다
+        except Exception as e:
+            print(f"[cmd] 폴링 오류: {e}", flush=True)
+
+
+def handle_cmd(body):
+    """probe_server 가 책임지는 명령: 프로브 기록 초기화, 게이트웨이 초기화 등록."""
+    action = body.get("action")
+    con = sqlite3.connect(DB_PATH, timeout=30)
+    con.execute("PRAGMA busy_timeout=30000")
+    try:
+        if action == "reset_probe":
+            n = con.execute("SELECT COUNT(*) FROM probe_rx").fetchone()[0]
+            con.execute("DELETE FROM probe_rx")
+            con.execute("DELETE FROM sqlite_sequence WHERE name='probe_rx'")
+            con.commit()
+            con.execute("VACUUM")
+            print(f"[cmd] 프로브 기록 {n}행 삭제", flush=True)
+        elif action == "reset_gateway":
+            con.execute("""CREATE TABLE IF NOT EXISTS pending_cmd(
+                src TEXT PRIMARY KEY, cmd TEXT, cmd_id TEXT,
+                created_ns INTEGER, acked_ns INTEGER)""")
+            con.execute(
+                "INSERT OR REPLACE INTO pending_cmd(src,cmd,cmd_id,created_ns,acked_ns)"
+                " VALUES(?,?,?,?,NULL)",
+                (body.get("src", "rak7248-gw"), "reset",
+                 body.get("cmd_id", ""), time.time_ns()))
+            con.commit()
+            print(f"[cmd] 게이트웨이 초기화 등록: {body.get('cmd_id')}", flush=True)
+        else:
+            print(f"[cmd] 알 수 없는 action: {action}", flush=True)
+    finally:
+        con.close()
 
 
 def ack_worker():
@@ -119,6 +233,12 @@ def main():
     threading.Thread(target=writer, daemon=True).start()
     threading.Thread(target=cmd_poller, daemon=True).start()
     threading.Thread(target=ack_worker, daemon=True).start()
+    threading.Thread(target=snapshot_worker,
+                     args=(DB_PATH, SNAP_PATH, "probe_rx", SNAP_SEC),
+                     daemon=True).start()
+    threading.Thread(target=cmd_file_worker,
+                     args=(("reset_probe", "reset_gateway"), handle_cmd),
+                     daemon=True).start()
 
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)

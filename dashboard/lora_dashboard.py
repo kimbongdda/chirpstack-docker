@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import contextlib
 import json
 import base64
 import os
@@ -746,6 +747,23 @@ PROBE_STALE_SEC = 30    # 이 시간 넘게 수신 없으면 지연
 PROBE_DOWN_SEC = 90     # 이 시간 넘게 수신 없으면 끊김
 
 
+@contextlib.contextmanager
+def _probe_db_open(path=None):
+    """측정 DB 를 열고 **반드시 닫는다.**
+
+    `with sqlite3.connect(...)` 는 커넥션을 닫지 않는다 — 트랜잭션만 정리한다.
+    그래서 5초마다 폴링되는 조회에서 파일 핸들이 계속 새고, 컨테이너가 스냅샷
+    파일을 영구히 열어둔 상태가 된다. Windows 는 열려 있는 파일을 os.replace 로
+    덮어쓸 수 없으므로 **호스트의 스냅샷 갱신이 조용히 멈춘다**(실제로 50분간
+    멈췄다). 조회는 전부 이 컨텍스트 매니저를 쓸 것.
+    """
+    conn = _probe_db_ro(path or PROBE_DB_PATH)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
 def _probe_db_ro(path):
     """측정 DB 를 read-only 로 연다.
 
@@ -772,7 +790,7 @@ def api_probe():
                         "reason": "프로브 DB 없음 (응답기 미가동)"})
 
     try:
-        with _probe_db() as conn:
+        with _probe_db_open() as conn:
             row = conn.execute(
                 "SELECT run, seq, src, peer, t1, t2, t3, tsrc, path"
                 " FROM probe_rx WHERE src NOT LIKE 'selftest%' AND src != 'pretest'"
@@ -863,11 +881,29 @@ PROBE_DATASETS = {
 }
 
 
-def _probe_db_rw(path):
-    """초기화용 쓰기 커넥션. 호스트 로거와 잠금을 다투므로 반드시 대기시킨다."""
-    conn = sqlite3.connect(path, timeout=30)
-    conn.execute("PRAGMA busy_timeout=30000")
-    return conn
+# 명령 파일 디렉터리.
+#
+# 측정 DB 에 컨테이너가 직접 쓰면 안 된다. /app/probe 는 9p 마운트인데 9p 는
+# SQLite 의 POSIX 잠금을 제대로 지원하지 않아, 호스트 로거와 동시에 쓰면 DB 가
+# 손상된다(실제로 "database disk image is malformed" 발생).
+#
+# 그래서 여기서 읽는 파일은 호스트가 원자적으로 내보낸 '스냅샷'이고(최대 20초
+# 지연), 초기화 같은 쓰기 작업은 작은 JSON 명령 파일로 넘겨 호스트 로거가
+# 수행한다. 일반 파일 쓰기는 9p 에서도 안전하다.
+PROBE_CMD_DIR = os.getenv("PROBE_CMD_DIR", "/app/probe/cmd")
+
+
+def _queue_probe_cmd(prefix, body):
+    """호스트 로거가 처리할 명령 파일을 원자적으로 남긴다."""
+    import uuid
+    os.makedirs(PROBE_CMD_DIR, exist_ok=True)
+    name = f"{prefix}_{uuid.uuid4().hex[:8]}.json"
+    final = os.path.join(PROBE_CMD_DIR, name)
+    tmp = final + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(body, f)
+    os.replace(tmp, final)        # 폴러가 반쯤 쓰인 파일을 읽지 않게
+    return name
 
 
 @app.route("/api/probe/export")
@@ -915,15 +951,16 @@ def api_probe_export():
 
 @app.route("/api/probe/reset", methods=["POST"])
 def api_probe_reset():
-    """측정 기록을 초기화한다.
+    """측정 기록 초기화를 호스트 로거에 요청한다.
 
-    파일을 지우지 않고 DELETE + VACUUM 으로 비운다. 호스트 로거가 파일을 열어둔
-    상태이므로 파일을 지우면 로거의 핸들이 끊긴 채 살아 있어 기록이 조용히
-    멈춘다. 테이블만 비우면 로거는 그대로 다음 행부터 이어 쓴다.
+    컨테이너가 직접 지우지 않는다. 측정 DB 는 9p 마운트 위에 있고, 그 위에서
+    SQLite 를 호스트 로거와 동시에 쓰면 DB 가 손상된다(실제로 발생). 대신 명령
+    파일을 남기고, DB 를 소유한 호스트 프로세스가 DELETE + VACUUM 을 수행한다.
 
-    실수 방지를 위해 본문에 confirm=true 를 요구한다.
+    따라서 결과는 '등록됨'이고 실제 삭제는 수 초 내에 일어난다.
     """
     from flask import request as flask_request
+    import uuid
 
     body = flask_request.get_json(silent=True) or {}
     if body.get("confirm") is not True:
@@ -935,51 +972,27 @@ def api_probe_reset():
         return jsonify({"error": f"알 수 없는 대상: {bad}"}), 400
 
     result = {}
-
-    # 게이트웨이 초기화는 직접 지울 수 없으므로, 프로브 응답 채널에 명령을
-    # 올려둔다. 응답기가 이를 실어 보내고 게이트웨이가 ack 하면 해제된다.
-    # (규격: docs/latency-probe/protocol.md v2)
-    if "gateway" in targets:
-        import uuid
-        src = body.get("gateway_src", "rak7248-gw")
-        try:
-            conn = _probe_db_rw(PROBE_DB_PATH)
-            conn.execute("""CREATE TABLE IF NOT EXISTS pending_cmd(
-                src TEXT PRIMARY KEY, cmd TEXT, cmd_id TEXT,
-                created_ns INTEGER, acked_ns INTEGER)""")
+    try:
+        if "probe" in targets:
+            _queue_probe_cmd("reset_probe", {"action": "reset_probe"})
+            result["probe"] = {"ok": True, "queued": True, "label": "프로브"}
+        if "e2e" in targets:
+            _queue_probe_cmd("reset_e2e", {"action": "reset_e2e"})
+            result["e2e"] = {"ok": True, "queued": True, "label": "LoRa 종단"}
+        if "gateway" in targets:
             cmd_id = uuid.uuid4().hex[:16]
-            conn.execute(
-                "INSERT OR REPLACE INTO pending_cmd(src,cmd,cmd_id,created_ns,acked_ns)"
-                " VALUES(?,?,?,?,NULL)",
-                (src, "reset", cmd_id, int(datetime.now(KST).timestamp() * 1e9)))
-            conn.commit()
-            conn.close()
+            _queue_probe_cmd("reset_gateway", {
+                "action": "reset_gateway",
+                "src": body.get("gateway_src", "rak7248-gw"),
+                "cmd_id": cmd_id})
             result["gateway"] = {"ok": True, "queued": True, "cmd_id": cmd_id,
-                                 "label": "게이트웨이", "src": src}
-            print(f"[reset] 게이트웨이 초기화 명령 등록: {src} / {cmd_id}", flush=True)
-        except sqlite3.Error as e:
-            result["gateway"] = {"ok": False, "reason": str(e)}
+                                 "label": "게이트웨이"}
+        print(f"[reset] 명령 등록: {list(result)}", flush=True)
+    except OSError as e:
+        return jsonify({"error": f"명령 등록 실패: {e}"}), 500
 
-    for kind in [t for t in targets if t != "gateway"]:
-        path, table, label = PROBE_DATASETS[kind]
-        if not os.path.exists(path):
-            result[kind] = {"ok": False, "reason": "DB 없음"}
-            continue
-        try:
-            conn = _probe_db_rw(path)
-            before = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-            conn.execute(f"DELETE FROM {table}")
-            # id 를 1부터 다시 시작시킨다 (AUTOINCREMENT 는 별도 테이블에 기록됨)
-            conn.execute("DELETE FROM sqlite_sequence WHERE name = ?", (table,))
-            conn.commit()
-            conn.execute("VACUUM")           # 파일 크기 회수
-            conn.close()
-            result[kind] = {"ok": True, "deleted": before, "label": label}
-            print(f"[reset] {label}: {before}행 삭제", flush=True)
-        except sqlite3.Error as e:
-            result[kind] = {"ok": False, "reason": str(e)}
-
-    return jsonify({"results": result})
+    return jsonify({"results": result,
+                    "note": "호스트 로거가 수 초 내에 처리합니다"})
 
 
 @app.route("/api/probe/cmd-status")
@@ -1035,7 +1048,7 @@ def api_probe_outages():
 
     try:
         since_ns = _time.time_ns() - hours * 3600 * 1_000_000_000
-        with _probe_db() as conn:
+        with _probe_db_open() as conn:
             rows = conn.execute(
                 "SELECT t2, seq, run, path FROM probe_rx"
                 " WHERE src = 'rak7248-gw' AND t2 >= ?"

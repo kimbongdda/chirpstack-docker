@@ -38,8 +38,14 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 # prefix 를 '+' 로 받으면 지역이 바뀌어도 설정 변경 없이 그대로 동작하고,
 # 어느 지역에서 온 프레임인지는 region 컬럼에 남긴다.
 TOPIC     = os.getenv("GW_TOPIC", "+/gateway/+/event/up")
+# 라이브 DB 는 9p 마운트(probe/data) 밖에 둔다. 9p 위에서 SQLite 를 호스트가 쓰고
+# 컨테이너가 읽으면 잠금·캐싱 문제로 "malformed" 가 난다 (probe_server.py 주석 참고).
+# 컨테이너가 읽을 스냅샷만 probe/data 로 원자적으로 내보낸다.
 DB_PATH   = os.getenv("E2E_DB_PATH",
-                      r"C:\Users\Administrator\chirpstack-docker\probe\data\e2e_latency.db")
+                      r"C:\Users\Administrator\chirpstack-docker\probe\live\e2e_latency.db")
+SNAP_PATH = r"C:\Users\Administrator\chirpstack-docker\probe\data\e2e_latency.db"
+CMD_DIR   = r"C:\Users\Administrator\chirpstack-docker\probe\data\cmd"
+SNAP_SEC  = int(os.getenv("E2E_SNAP_SEC", "20"))
 
 logq = queue.Queue(maxsize=200000)
 
@@ -162,9 +168,60 @@ def on_message(client, userdata, msg):
         return                                    # 어떤 프레임에도 죽지 않는다
 
 
+def snapshot_worker():
+    """라이브 DB 의 일관된 사본을 마운트 폴더로 원자적으로 내보낸다."""
+    tmp = SNAP_PATH + ".tmp"
+    while True:
+        time.sleep(SNAP_SEC)
+        try:
+            os.makedirs(os.path.dirname(SNAP_PATH), exist_ok=True)
+            src = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=30)
+            dst = sqlite3.connect(tmp)
+            src.backup(dst)
+            dst.close()
+            src.close()
+            os.replace(tmp, SNAP_PATH)
+        except Exception as e:
+            print(f"[snap] e2e 스냅샷 실패: {e}", flush=True)
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+def cmd_file_worker():
+    """대시보드가 남긴 e2e 초기화 명령 파일을 처리한다."""
+    while True:
+        time.sleep(2)
+        try:
+            if not os.path.isdir(CMD_DIR):
+                continue
+            for fn in sorted(os.listdir(CMD_DIR)):
+                if not (fn.startswith("reset_e2e") and fn.endswith(".json")):
+                    continue
+                path = os.path.join(CMD_DIR, fn)
+                try:
+                    con = sqlite3.connect(DB_PATH, timeout=30)
+                    con.execute("PRAGMA busy_timeout=30000")
+                    n = con.execute("SELECT COUNT(*) FROM e2e").fetchone()[0]
+                    con.execute("DELETE FROM e2e")
+                    con.execute("DELETE FROM sqlite_sequence WHERE name='e2e'")
+                    con.commit()
+                    con.execute("VACUUM")
+                    con.close()
+                    print(f"[cmd] LoRa 종단 기록 {n}행 삭제", flush=True)
+                except Exception as e:
+                    print(f"[cmd] e2e 초기화 실패: {e}", flush=True)
+                os.remove(path)
+        except Exception as e:
+            print(f"[cmd] 폴링 오류: {e}", flush=True)
+
+
 def main():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     threading.Thread(target=writer, daemon=True).start()
+    threading.Thread(target=snapshot_worker, daemon=True).start()
+    threading.Thread(target=cmd_file_worker, daemon=True).start()
 
     c = mqtt.Client()
     c.on_connect = on_connect
