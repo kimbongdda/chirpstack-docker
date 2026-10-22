@@ -1,0 +1,8 @@
+[Unit]
+Description=Daily backup of lora-probe DB (keep 7)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/lora-probe/probe-db-backup.py
+Nice=15
+IOSchedulingClass=idle

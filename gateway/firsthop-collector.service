@@ -1,0 +1,15 @@
+[Unit]
+Description=First-hop collector (router ping + Starlink dish gRPC) for LoRa gateway
+After=network-online.target time-sync.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/lora-probe/firsthop_collector.py
+Restart=always
+RestartSec=10
+# 프로브보다 우선순위를 낮춘다 (lora-probe 는 Nice=-5)
+Nice=5
+
+[Install]
+WantedBy=multi-user.target
