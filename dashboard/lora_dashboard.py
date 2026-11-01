@@ -995,6 +995,82 @@ def api_probe_reset():
                     "note": "호스트 로거가 수 초 내에 처리합니다"})
 
 
+@app.route("/api/probe/measure", methods=["POST"])
+def api_probe_measure():
+    """게이트웨이 지연 측정을 켜거나 끈다 (프로토콜 v3, protocol.md §11).
+
+    끄면 게이트웨이는 LoRa 게이트웨이 역할만 하고 측정·첫 홉 수집을 멈춘다. 명령은
+    초기화와 같은 응답 채널로 가므로, 켜져 있으면 다음 프로브(1초), 꺼져 있으면 다음
+    대기 신호(최대 30초)에 전달된다. 결과는 '등록됨'이고 반영은 /api/probe/gw-state 로 본다.
+    """
+    from flask import request as flask_request
+    import uuid
+
+    body = flask_request.get_json(silent=True) or {}
+    if not isinstance(body.get("on"), bool):
+        return jsonify({"error": "on=true/false 필요"}), 400
+    src = body.get("gateway_src", "rak7248-gw")
+
+    # 게이트웨이당 대기 명령은 하나뿐이다. 아직 전달 안 된 초기화를 덮어쓰지 않는다.
+    pend = _probe_pending_cmd(src)
+    if pend and pend["cmd"] == "reset":
+        return jsonify({"error": "게이트웨이 초기화 명령이 아직 전달 대기 중입니다. "
+                                 "반영된 뒤 다시 시도하세요."}), 409
+
+    cmd_id = uuid.uuid4().hex[:16]
+    try:
+        _queue_probe_cmd("measure_gateway", {"action": "measure_gateway", "src": src,
+                                             "on": body["on"], "cmd_id": cmd_id})
+    except OSError as e:
+        return jsonify({"error": f"명령 등록 실패: {e}"}), 500
+    print(f"[measure] {src} 측정 {'켜기' if body['on'] else '끄기'} 등록 {cmd_id}", flush=True)
+    return jsonify({"ok": True, "queued": True, "cmd_id": cmd_id, "on": body["on"]})
+
+
+def _probe_pending_cmd(src):
+    """src 의 아직 ack 되지 않은 명령. 없거나 읽을 수 없으면 None."""
+    if not os.path.exists(PROBE_DB_PATH):
+        return None
+    try:
+        with _probe_db_open() as conn:
+            if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table'"
+                                " AND name='pending_cmd'").fetchone():
+                return None
+            r = conn.execute("SELECT cmd, cmd_id, created_ns FROM pending_cmd"
+                             " WHERE src=? AND acked_ns IS NULL", (src,)).fetchone()
+            return dict(r) if r else None
+    except sqlite3.Error:
+        return None
+
+
+@app.route("/api/probe/gw-state")
+def api_probe_gw_state():
+    """게이트웨이 측정 상태: 게이트웨이가 마지막으로 보고한 mode 와 대기 중인 켜기/끄기 명령."""
+    from flask import request as flask_request
+    import time as _time
+
+    src = flask_request.args.get("src", "rak7248-gw")
+    out = {"src": src, "mode": None, "last_seen_sec": None, "pending": None}
+    if os.path.exists(PROBE_DB_PATH):
+        try:
+            with _probe_db_open() as conn:
+                if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table'"
+                                " AND name='gw_state'").fetchone():
+                    r = conn.execute("SELECT mode, last_seen_ns FROM gw_state WHERE src=?",
+                                     (src,)).fetchone()
+                    if r:
+                        out["mode"] = r["mode"]
+                        out["last_seen_sec"] = round((_time.time_ns() - r["last_seen_ns"]) / 1e9, 1)
+        except sqlite3.Error as e:
+            out["reason"] = str(e)
+    pend = _probe_pending_cmd(src)
+    if pend and pend["cmd"] in ("measure_on", "measure_off"):
+        out["pending"] = {"cmd": pend["cmd"], "cmd_id": pend["cmd_id"],
+                          "age_sec": round((_time.time_ns() - pend["created_ns"]) / 1e9, 1)
+                          if pend["created_ns"] else None}
+    return jsonify(out)
+
+
 @app.route("/api/probe/cmd-status")
 def api_probe_cmd_status():
     """게이트웨이 초기화 명령의 진행 상태. 등록 -> 전달 -> ack 까지를 보여준다."""
@@ -1053,6 +1129,13 @@ def api_probe_outages():
                 "SELECT t2, seq, run, path FROM probe_rx"
                 " WHERE src = 'rak7248-gw' AND t2 >= ?"
                 " ORDER BY t2", (since_ns,)).fetchall()
+            # 측정을 꺼 둔 구간 (protocol.md §11). 그 사이의 빈틈은 끊김이 아니다.
+            mode_log = []
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table'"
+                            " AND name='gw_mode_log'").fetchone():
+                mode_log = conn.execute(
+                    "SELECT t_ns, mode FROM gw_mode_log WHERE src = 'rak7248-gw'"
+                    " ORDER BY t_ns").fetchall()
     except sqlite3.Error as e:
         return jsonify({"available": False, "reason": f"DB 조회 실패: {e}"})
 
@@ -1066,11 +1149,27 @@ def api_probe_outages():
     nominal = sorted(gaps)[len(gaps) // 2] or 10.0
     threshold = nominal * gap_factor
 
+    off_spans, off_since = [], None
+    for r in mode_log:
+        if r["mode"] == "off" and off_since is None:
+            off_since = r["t_ns"]
+        elif r["mode"] == "on" and off_since is not None:
+            off_spans.append((off_since, r["t_ns"]))
+            off_since = None
+    if off_since is not None:
+        off_spans.append((off_since, _time.time_ns()))
+
     outages = []
+    paused_sec = 0.0
+    paused_count = 0
     for i, g in enumerate(gaps):
         if g <= threshold:
             continue
         a, b = rows[i], rows[i + 1]
+        if any(s0 < b["t2"] and a["t2"] < s1 for s0, s1 in off_spans):
+            paused_count += 1                    # 측정을 꺼 둔 구간 -> 끊김 아님
+            paused_sec += g
+            continue
         outages.append({
             "start": a["t2"] // 1_000_000,          # ms epoch
             "end": b["t2"] // 1_000_000,
@@ -1104,7 +1203,7 @@ def api_probe_outages():
         last_known = p
 
     total_out = sum(o["duration_sec"] for o in outages)
-    span_sec = (rows[-1]["t2"] - rows[0]["t2"]) / 1e9
+    span_sec = (rows[-1]["t2"] - rows[0]["t2"]) / 1e9 - paused_sec   # 꺼 둔 시간은 분모에서도 뺀다
 
     return jsonify({
         "available": True,
@@ -1115,6 +1214,8 @@ def api_probe_outages():
         "span_sec": round(span_sec, 1),
         "outage_count": len(outages),
         "outage_total_sec": round(total_out, 1),
+        "paused_count": paused_count,
+        "paused_sec": round(paused_sec, 1),
         "availability_pct": round(100.0 * (1 - total_out / span_sec), 3) if span_sec else None,
         "longest_sec": round(max((o["duration_sec"] for o in outages), default=0), 1),
         "path_change_count": len(path_changes),

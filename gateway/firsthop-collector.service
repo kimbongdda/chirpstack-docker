@@ -5,6 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# 대시보드에서 측정을 꺼 둔 상태(lora-probe 가 mode 파일에 off 기록)면 부팅 때 시작하지 않는다.
+# 켜기 명령이 오면 lora-probe 가 mode 를 on 으로 바꾼 뒤 이 유닛을 직접 시작한다.
+ExecCondition=/bin/sh -c '[ "$(cat /var/lib/lora-probe/mode 2>/dev/null)" != off ]'
 ExecStart=/usr/bin/python3 /opt/lora-probe/firsthop_collector.py
 Restart=always
 RestartSec=10

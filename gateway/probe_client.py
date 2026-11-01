@@ -11,6 +11,11 @@ v2 에서 추가된 것: 서버가 응답에 실어 보내는 제어 명령(기�
 같은 cmd_id 가 여러 번 도착한다. 실행한 cmd_id 를 파일에 남겨 프로세스가
 재시작해도 중복 실행되지 않게 한다.
 
+v3 (측정 켜기/끄기): 대시보드 버튼으로 측정을 끄면 이 게이트웨이는 LoRa 게이트웨이 역할만
+한다. 지연 측정을 멈추고 첫 홉 수집기(firsthop-collector)도 세운다. 다만 다시 켜라는
+명령도 같은 응답 채널로 오므로, 꺼진 동안에도 HEARTBEAT 초마다 기록하지 않는 대기 신호를
+하나 보낸다. 상태는 파일에 남겨 재부팅해도 유지된다 (protocol.md §11).
+
 RTC 가 없어서 부팅 직후 시계는 fake-hwclock 이 복원한 옛 시각이다. 그 시각으로 run 을
 정하면 run 이 실제 시작 시각과 수 주씩 어긋나므로, systemd 쪽에서 NTP 동기화를 기다린 뒤
 시작하고(lora-probe.service.d/time-sync.conf), 그래도 실행 중에 시계가 점프하면
@@ -30,9 +35,13 @@ SERVER   = ("100.84.186.95", 1800)
 NODE     = "rak7248-gw"
 DB_PATH  = "/var/lib/lora-probe/probe_client.db"
 CMD_STATE = "/var/lib/lora-probe/last_cmd_id"     # 실행한 cmd_id 영속화
+MODE_PATH = "/var/lib/lora-probe/mode"            # 측정 켜짐(on)/꺼짐(off) 영속화
+COLLECTOR_UNIT = "firsthop-collector.service"     # 측정과 함께 켜고 끄는 첫 홉 수집기
 INTERVAL = float(os.getenv("PROBE_INTERVAL", "5"))
 TIMEOUT  = float(os.getenv("PROBE_TIMEOUT", "2"))
 TSRC     = os.getenv("PROBE_TSRC", "sys")         # PPS 없음 -> sys
+# 측정을 끈 동안 명령을 받기 위한 대기 신호 주기. 켜기 버튼이 반영되는 최대 지연이기도 하다.
+HEARTBEAT = float(os.getenv("PROBE_HEARTBEAT", "30"))
 
 # 연속으로 이만큼 실패하면 소켓을 다시 만든다 (회선 전환 시 소켓 고정 대응)
 RECREATE_AFTER_LOSSES = int(os.getenv("PROBE_RECREATE_AFTER", "3"))
@@ -49,21 +58,49 @@ _reset_done = threading.Event()     # writer -> 메인 루프 완료 통지
 
 # ===================== 제어 명령 =====================
 
-def load_last_cmd():
+def read_state(path, default=""):
     try:
-        with open(CMD_STATE) as f:
-            return f.read().strip()
+        with open(path) as f:
+            return f.read().strip() or default
     except OSError:
-        return ""
+        return default
+
+
+def write_state(path, value):
+    """임시 파일에 쓰고 fsync 후 교체한다. 정전이 잦은 현장이라, 쓰다 끊겨
+    빈 파일이 남으면 같은 명령을 다시 실행하거나 측정 상태를 잃는다."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(value)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except OSError as e:
+        print(f"[probe] {os.path.basename(path)} 저장 실패: {e}", flush=True)
+
+
+def load_last_cmd():
+    return read_state(CMD_STATE)
 
 
 def save_last_cmd(cmd_id):
+    write_state(CMD_STATE, cmd_id)
+
+
+def load_mode():
+    return "off" if read_state(MODE_PATH, "on") == "off" else "on"
+
+
+def set_collector(on):
+    """첫 홉 수집기를 측정 상태에 맞춘다. 수집기 유닛은 mode 파일이 off 면 부팅 때도
+    시작하지 않는다(ExecCondition). 실패해도 측정 자체는 계속한다."""
     try:
-        os.makedirs(os.path.dirname(CMD_STATE), exist_ok=True)
-        with open(CMD_STATE, "w") as f:
-            f.write(cmd_id)
-    except OSError as e:
-        print(f"[probe] cmd_id 저장 실패: {e}", flush=True)
+        subprocess.run(["systemctl", "start" if on else "stop", COLLECTOR_UNIT],
+                       capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"[probe] {COLLECTOR_UNIT} {'시작' if on else '정지'} 실패: {e}", flush=True)
 
 
 # ===================== 경로 판정 =====================
@@ -192,12 +229,15 @@ def main():
     run = int(time.time())
     seq = 0
     last_cmd_id = load_last_cmd()
+    mode = load_mode()
+    if mode == "off":
+        set_collector(False)                 # 부팅 순서상 먼저 떴을 수도 있으니 한 번 더
     consecutive_losses = 0
     wall_minus_mono = time.time_ns() - time.monotonic_ns()
     s = new_socket()
     synced = clock_synced()
     print(f"[probe] run={run} -> {SERVER} every {INTERVAL}s "
-          f"(last_cmd_id={last_cmd_id or 'none'})"
+          f"(last_cmd_id={last_cmd_id or 'none'}) mode={mode}"
           + ("" if synced is not False else " (경고: 시계 미동기 상태로 시작)"), flush=True)
 
     while True:
@@ -216,7 +256,7 @@ def main():
         seq += 1
         p, r = _path["path"], _path["relay"]
         req = {"v": 2, "typ": "req", "run": run, "seq": seq, "src": NODE,
-               "t1": 0, "tsrc": TSRC, "path": p}
+               "t1": 0, "tsrc": TSRC, "path": p, "mode": mode}
         if last_cmd_id:
             req["ack_id"] = last_cmd_id      # 서버가 명령을 내릴 수 있게 계속 echo
         body = json.dumps(req, separators=(",", ":"))
@@ -249,29 +289,46 @@ def main():
             row = (run, seq, t1, None, None, None, None, None, None, 1, TSRC, p, r)
             consecutive_losses += 1
 
-        try:
-            logq.put_nowait(row)
-        except queue.Full:
-            pass
+        if mode == "on":                     # 꺼진 동안의 대기 신호는 측정이 아니므로 남기지 않는다
+            try:
+                logq.put_nowait(row)
+            except queue.Full:
+                pass
 
         # ---- 제어 명령 처리 ----
         # 같은 cmd_id 가 반복 도착하므로(ack 유실 대비 서버가 계속 보냄)
         # 실행한 id 와 다를 때만 실행한다.
-        if cmd and cmd[0] == "reset" and cmd[1] and cmd[1] != last_cmd_id:
-            print(f"[probe] 초기화 명령 수신: {cmd[1]}", flush=True)
+        if cmd and cmd[0] in ("reset", "measure_off", "measure_on") and cmd[1] and cmd[1] != last_cmd_id:
             last_cmd_id = cmd[1]
             save_last_cmd(last_cmd_id)       # 재시작해도 중복 실행 안 되게 먼저 저장
-            _reset_done.clear()
-            _reset_req.set()
-            if _reset_done.wait(timeout=60):
-                run = int(time.time())       # 새 run 으로 구간을 구분
-                seq = 0
-                print(f"[probe] 새 run={run} 시작", flush=True)
+            if cmd[0] == "reset":
+                print(f"[probe] 초기화 명령 수신: {cmd[1]}", flush=True)
+                _reset_done.clear()
+                _reset_req.set()
+                if _reset_done.wait(timeout=60):
+                    run = int(time.time())   # 새 run 으로 구간을 구분
+                    seq = 0
+                    print(f"[probe] 새 run={run} 시작", flush=True)
+                else:
+                    print("[probe] 초기화 대기 시간 초과", flush=True)
             else:
-                print("[probe] 초기화 대기 시간 초과", flush=True)
+                new_mode = "off" if cmd[0] == "measure_off" else "on"
+                print(f"[probe] 측정 {'끄기' if new_mode == 'off' else '켜기'} 명령 수신: {cmd[1]}"
+                      + (" (이미 같은 상태)" if new_mode == mode else ""), flush=True)
+                if new_mode != mode:
+                    mode = new_mode
+                    write_state(MODE_PATH, mode)
+                    set_collector(mode == "on")
+                    if mode == "on":
+                        run = int(time.time())   # 측정 재개 구간을 새 run 으로 구분
+                        seq = 0
+                        print(f"[probe] 측정 재개, 새 run={run}", flush=True)
+                    else:
+                        print(f"[probe] 측정 정지 — {HEARTBEAT:.0f}초마다 대기 신호만 보냄", flush=True)
 
         # ---- 소켓 자가복구 ----
-        if consecutive_losses >= RECREATE_AFTER_LOSSES:
+        # 꺼진 동안은 대기 신호가 드물어 3회 연속 실패면 바로 다시 만든다
+        if consecutive_losses >= (RECREATE_AFTER_LOSSES if mode == "on" else 3):
             print(f"[probe] {consecutive_losses}회 연속 실패 — 소켓 재생성", flush=True)
             try:
                 s.close()
@@ -287,7 +344,7 @@ def main():
                 _path.update(path=r2[0], relay=r2[1])
 
         slept = time.perf_counter() - cycle_start
-        time.sleep(max(0.0, INTERVAL - slept))
+        time.sleep(max(0.0, (INTERVAL if mode == "on" else HEARTBEAT) - slept))
 
 
 if __name__ == "__main__":

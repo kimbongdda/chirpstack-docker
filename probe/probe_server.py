@@ -41,6 +41,17 @@ ackq = queue.Queue(maxsize=10000)
 _cmd_lock = threading.Lock()
 _pending = {}                # src -> (cmd, cmd_id)
 
+# ===== 측정 켜기/끄기 (프로토콜 v3, protocol.md §11) =====
+#
+# 대시보드가 measure_off 를 보내면 게이트웨이는 측정을 멈추고 30초마다 대기 신호
+# (mode="off" 요청)만 보낸다. 대기 신호도 명령 전달·ack 에는 쓰지만 측정이 아니므로
+# probe_rx 에는 남기지 않는다. 게이트웨이별 현재 상태와 상태 전환 이력은 대시보드가
+# 상태를 보여주고, 꺼진 구간을 회선 끊김으로 오인하지 않게 하는 데 쓴다.
+# 핫패스에서는 메모리만 만지고, DB 기록은 gw_state_worker 가 한다.
+_gw_lock = threading.Lock()
+_gw_seen = {}                # src -> (mode, last_t2_ns)
+modeq = queue.Queue(maxsize=10000)
+
 
 def cmd_poller():
     """pending_cmd 를 주기적으로 읽어 메모리에 캐시한다.
@@ -155,6 +166,19 @@ def handle_cmd(body):
             con.commit()
             con.execute("VACUUM")
             print(f"[cmd] 프로브 기록 {n}행 삭제", flush=True)
+        elif action == "measure_gateway":
+            on = bool(body.get("on"))
+            con.execute("""CREATE TABLE IF NOT EXISTS pending_cmd(
+                src TEXT PRIMARY KEY, cmd TEXT, cmd_id TEXT,
+                created_ns INTEGER, acked_ns INTEGER)""")
+            con.execute(
+                "INSERT OR REPLACE INTO pending_cmd(src,cmd,cmd_id,created_ns,acked_ns)"
+                " VALUES(?,?,?,?,NULL)",
+                (body.get("src", "rak7248-gw"), "measure_on" if on else "measure_off",
+                 body.get("cmd_id", ""), time.time_ns()))
+            con.commit()
+            print(f"[cmd] 게이트웨이 측정 {'켜기' if on else '끄기'} 등록: {body.get('cmd_id')}",
+                  flush=True)
         elif action == "reset_gateway":
             con.execute("""CREATE TABLE IF NOT EXISTS pending_cmd(
                 src TEXT PRIMARY KEY, cmd TEXT, cmd_id TEXT,
@@ -187,6 +211,39 @@ def ack_worker():
             print(f"[cmd] {src} acked {ack_id}", flush=True)
         except sqlite3.Error as e:
             print(f"[cmd] ack 기록 실패: {e}", flush=True)
+
+
+def gw_state_worker():
+    """게이트웨이별 측정 상태(gw_state)와 상태 전환 이력(gw_mode_log)을 기록한다."""
+    con = sqlite3.connect(DB_PATH, timeout=30)
+    con.execute("PRAGMA busy_timeout=30000")
+    con.execute("""CREATE TABLE IF NOT EXISTS gw_state(
+        src TEXT PRIMARY KEY, mode TEXT, last_seen_ns INTEGER)""")
+    con.execute("""CREATE TABLE IF NOT EXISTS gw_mode_log(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, src TEXT, t_ns INTEGER, mode TEXT)""")
+    con.commit()
+    while True:
+        time.sleep(5)
+        try:
+            while True:
+                try:
+                    src, mode, t = modeq.get_nowait()
+                except queue.Empty:
+                    break
+                # 서버가 재시작하면 처음 본 상태도 큐에 들어온다 -> 실제로 바뀐 것만 남긴다
+                last = con.execute("SELECT mode FROM gw_mode_log WHERE src=?"
+                                   " ORDER BY t_ns DESC LIMIT 1", (src,)).fetchone()
+                if not last or last[0] != mode:
+                    con.execute("INSERT INTO gw_mode_log(src,t_ns,mode) VALUES(?,?,?)",
+                                (src, t, mode))
+                    print(f"[mode] {src} 측정 {mode}", flush=True)
+            with _gw_lock:
+                seen = list(_gw_seen.items())
+            con.executemany("INSERT OR REPLACE INTO gw_state(src,mode,last_seen_ns) VALUES(?,?,?)",
+                            [(src, m, t) for src, (m, t) in seen])
+            con.commit()
+        except sqlite3.Error as e:
+            print(f"[mode] 상태 기록 실패: {e}", flush=True)
 
 
 def writer():
@@ -233,11 +290,12 @@ def main():
     threading.Thread(target=writer, daemon=True).start()
     threading.Thread(target=cmd_poller, daemon=True).start()
     threading.Thread(target=ack_worker, daemon=True).start()
+    threading.Thread(target=gw_state_worker, daemon=True).start()
     threading.Thread(target=snapshot_worker,
                      args=(DB_PATH, SNAP_PATH, "probe_rx", SNAP_SEC),
                      daemon=True).start()
     threading.Thread(target=cmd_file_worker,
-                     args=(("reset_probe", "reset_gateway"), handle_cmd),
+                     args=(("reset_probe", "reset_gateway", "measure_gateway"), handle_cmd),
                      daemon=True).start()
 
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -278,6 +336,19 @@ def main():
             t3 = time.time_ns()                      # <- 송신 직전
             body = body.replace('"t3":0', f'"t3":{t3}', 1)
             s.sendto(body.encode(), addr)
+
+            # mode 가 없으면 v1/v2 클라이언트 -> 항상 측정 중으로 본다
+            mode = "off" if m.get("mode") == "off" else "on"
+            with _gw_lock:
+                prev = _gw_seen.get(src)
+                _gw_seen[src] = (mode, t2)
+            if prev is None or prev[0] != mode:
+                try:
+                    modeq.put_nowait((src, mode, t2))
+                except queue.Full:
+                    pass
+            if mode == "off":
+                continue                             # 대기 신호는 측정 기록에 넣지 않는다
             try:
                 logq.put_nowait((m.get("run"), m.get("seq"), m.get("src"), addr[0],
                                  m.get("t1"), t2, t3, m.get("tsrc"), m.get("path")))

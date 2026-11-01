@@ -225,3 +225,34 @@ CREATE TABLE pending_cmd(
 
 `GET /api/probe/cmd-status` 로 진행 상태를 조회하고, `/probe` 페이지가
 대기 중인 명령을 표시한다.
+
+## 11. 프로토콜 v3 — 측정 켜기/끄기 (2026-11-01 추가)
+
+대시보드 버튼으로 게이트웨이의 지연 측정을 끄고 켠다. 끄면 게이트웨이는 **LoRa
+게이트웨이 역할만** 한다(lora-probe 측정과 firsthop-collector 수집 중단). §10 의 명령
+채널을 그대로 쓴다.
+
+### 11.1 필드·명령 추가
+
+| 위치 | 필드/값 | 설명 |
+|---|---|---|
+| 요청 | `mode` | `"on"` 또는 `"off"`. 없으면(v1/v2) `"on"` 으로 본다 |
+| 응답 | `cmd` | `"measure_off"`, `"measure_on"` 추가 (`cmd_id`·`ack_id` 처리는 §10 과 같음) |
+
+### 11.2 꺼진 상태
+
+- 명령은 응답에만 실려 오므로 **게이트웨이가 완전히 멈추면 다시 켤 수 없다.** 그래서 꺼진
+  동안에도 `PROBE_HEARTBEAT`(기본 30초)마다 `mode:"off"` 요청을 하나 보낸다(대기 신호).
+- 대기 신호는 측정이 아니다. 게이트웨이(`probe`)와 서버(`probe_rx`) 모두 기록하지 않는다.
+- 상태는 `/var/lib/lora-probe/mode` 에 남겨 재부팅해도 유지한다. firsthop-collector 는
+  이 파일이 `off` 면 부팅 때 시작하지 않는다(`ExecCondition`).
+- 다시 켜면 새 `run` 으로 시작해 측정 구간을 구분한다.
+- 켜기 반영은 최대 `PROBE_HEARTBEAT` 초, 끄기는 다음 프로브(1초) 때.
+
+### 11.3 서버
+
+- `gw_state(src, mode, last_seen_ns)`: 게이트웨이가 마지막으로 보고한 상태.
+- `gw_mode_log(src, t_ns, mode)`: 상태 전환 이력. 회선 끊김 분석(`/api/probe/outages`)은
+  꺼져 있던 구간의 빈틈을 끊김에서 빼고(`paused_count`, `paused_sec`) 가용률 분모에서도 뺀다.
+- 대시보드 → 응답기 전달은 다른 명령과 같이 명령 파일(`measure_gateway_*.json`)로 한다.
+- 게이트웨이당 대기 명령은 하나뿐이라, 전달 대기 중인 초기화가 있으면 켜기/끄기를 거부한다(409).

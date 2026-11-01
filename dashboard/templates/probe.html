@@ -31,6 +31,10 @@
     .btn-tool.danger { color: #c62828; border-color: #e2a8a6; }
     .btn-tool.danger:hover { background: #fff5f5; }
     .btn-tool:disabled { opacity: .5; cursor: default; }
+    .measure-chip { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+                    background: #f1f5f9; color: #64748b; }
+    .measure-chip.on { background: #e8f5e9; color: #2e7d32; }
+    .measure-chip.off { background: #fff3e0; color: #b26a00; }
 
     .section {
       background: white; border-radius: 8px; padding: 20px;
@@ -99,6 +103,10 @@
   <!-- 기록 관리 -->
   <div class="section" style="padding:14px 20px;">
     <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+      <span style="font-size:12px; font-weight:600; color:#64748b; margin-right:4px;">게이트웨이 측정</span>
+      <span class="measure-chip" id="measureChip">확인 중</span>
+      <button class="btn-tool" id="measureBtn" onclick="toggleMeasure(this)" disabled>…</button>
+      <span style="width:1px; height:20px; background:#e2e8f0; margin:0 6px;"></span>
       <span style="font-size:12px; font-weight:600; color:#64748b; margin-right:4px;">기록 관리</span>
       <a class="btn-tool" href="/api/probe/export?kind=probe">⬇ 프로브 CSV</a>
       <a class="btn-tool" href="/api/probe/export?kind=e2e">⬇ LoRa 종단 CSV</a>
@@ -107,12 +115,16 @@
       <button class="btn-tool danger" onclick="resetRecords(this,['probe','e2e','gateway'])">서버+게이트웨이 초기화</button>
     </div>
     <p id="resetMsg" style="font-size:12.5px; color:#64748b; margin-top:10px; display:none;"></p>
+    <p id="measureMsg" style="font-size:12.5px; margin-top:10px; display:none;"></p>
     <p id="cmdStatus" style="font-size:12px; margin-top:8px; display:none;"></p>
     <p style="font-size:11px; color:#94a3b8; margin-top:8px; line-height:1.7;">
       게이트웨이 초기화는 프로브 응답 채널로 명령을 보내는 방식입니다 — 즉시가 아니라
       <b>다음 프로브 주기(최대 5초) + 전달 확인</b>까지 걸립니다. 명령은 <code>cmd_id</code>로
       1회만 실행되며, 게이트웨이가 확인(ack)하면 자동 해제됩니다.
-      <b>지우기 전에 CSV를 내려받아 두세요.</b>
+      <b>지우기 전에 CSV를 내려받아 두세요.</b><br>
+      측정을 끄면 게이트웨이는 LoRa 게이트웨이 역할만 하고 지연 측정·첫 홉 수집을 멈춥니다.
+      꺼진 동안에도 다시 켜는 명령을 받으려고 <b>30초마다 대기 신호</b>만 보내므로, 켜기는
+      최대 30초 뒤에 반영됩니다. 꺼 둔 구간은 회선 끊김 이력에서 제외됩니다.
     </p>
   </div>
 
@@ -426,8 +438,9 @@
         if (open.length === 0) { el.style.display = 'none'; return; }
         el.style.display = 'block';
         el.style.color = '#b26a00';
+        const label = {reset: '초기화', measure_off: '측정 끄기', measure_on: '측정 켜기'};
         el.innerHTML = open.map(c =>
-          `⏳ <b>${c.src}</b> 초기화 명령 전달 대기 중 (cmd_id <code>${c.cmd_id}</code>, ${c.age_sec}초 경과)`
+          `⏳ <b>${c.src}</b> ${label[c.cmd] || c.cmd} 명령 전달 대기 중 (cmd_id <code>${c.cmd_id}</code>, ${c.age_sec}초 경과)`
         ).join('<br>');
       } catch (e) { /* 상태 표시는 실패해도 무시 */ }
     }
@@ -476,9 +489,65 @@
       }
     }
 
+    let measureMode = null;          // 게이트웨이가 마지막으로 보고한 상태
+
+    async function refreshMeasure() {
+      const chip = document.getElementById('measureChip');
+      const btn = document.getElementById('measureBtn');
+      try {
+        const d = await (await fetch('/api/probe/gw-state')).json();
+        measureMode = d.mode;
+        // 스냅샷 지연(최대 20초)과 꺼진 상태의 대기 신호 주기(30초)를 감안해 넉넉히 본다
+        const stale = d.last_seen_sec == null || d.last_seen_sec > 90;
+        chip.className = 'measure-chip' + (d.mode && !stale ? ' ' + d.mode : '');
+        chip.textContent = !d.mode ? '상태 모름'
+          : stale ? `응답 없음 (${Math.round(d.last_seen_sec)}초 전 ${d.mode === 'on' ? '측정 중' : '꺼짐'})`
+          : d.mode === 'on' ? '측정 중' : '측정 꺼짐 (GW 역할만)';
+        if (d.pending) {
+          btn.disabled = true;
+          btn.textContent = d.pending.cmd === 'measure_on' ? '켜는 중…' : '끄는 중…';
+        } else {
+          btn.disabled = !d.mode;
+          btn.textContent = d.mode === 'off' ? '측정 켜기' : '측정 끄기';
+        }
+      } catch (e) { /* 상태 표시는 실패해도 무시 */ }
+    }
+
+    async function toggleMeasure(btn) {
+      const msg = document.getElementById('measureMsg');
+      const turnOn = measureMode === 'off';
+      const q = turnOn
+        ? '게이트웨이 지연 측정을 다시 켭니다.\n\n다음 대기 신호(최대 30초) 때 반영되고, 새 run 으로 기록이 시작됩니다.'
+        : '게이트웨이 지연 측정을 끕니다.\n\n게이트웨이는 LoRa 게이트웨이 역할만 하고 지연 측정·첫 홉 수집을 멈춥니다.\n다시 켤 때까지 측정 데이터가 쌓이지 않습니다.';
+      if (!confirm(q)) return;
+      btn.disabled = true;
+      msg.style.display = 'block';
+      msg.style.color = '#64748b';
+      msg.textContent = '명령 등록 중…';
+      try {
+        const r = await fetch('/api/probe/measure', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({on: turnOn})
+        });
+        const d = await r.json();
+        if (d.error) throw new Error(d.error);
+        msg.style.color = '#2e7d32';
+        msg.textContent = `측정 ${turnOn ? '켜기' : '끄기'} 명령 등록 (cmd_id ${d.cmd_id}) — 게이트웨이 반영 대기 중`;
+        refreshCmdStatus();
+        refreshMeasure();
+      } catch (e) {
+        msg.style.color = '#c62828';
+        msg.textContent = '명령 등록 실패: ' + e.message;
+        btn.disabled = false;
+      }
+    }
+
     refreshProbe();
     refreshOutages();
     refreshCmdStatus();
+    refreshMeasure();
+    setInterval(refreshMeasure, 5000);
     setInterval(refreshProbe, 5000);
     setInterval(refreshOutages, 30000);
     setInterval(refreshCmdStatus, 5000);
