@@ -168,9 +168,20 @@ def handle_cmd(body):
             print(f"[cmd] 프로브 기록 {n}행 삭제", flush=True)
         elif action == "measure_gateway":
             on = bool(body.get("on"))
+            src = body.get("src", "rak7248-gw")
             con.execute("""CREATE TABLE IF NOT EXISTS pending_cmd(
                 src TEXT PRIMARY KEY, cmd TEXT, cmd_id TEXT,
                 created_ns INTEGER, acked_ns INTEGER)""")
+            # 대시보드도 대기 중인 초기화를 확인하지만, 그건 최대 20초 늦은 스냅샷을
+            # 본다. 초기화 직후 켜기/끄기를 누르면 그 확인이 뚫리고, 아래 INSERT OR
+            # REPLACE 가 전달 전의 초기화를 덮어써 게이트웨이가 초기화되지 않는다.
+            # 라이브 DB 를 보는 여기서 최종 판단한다.
+            pend = con.execute("SELECT cmd, cmd_id FROM pending_cmd"
+                               " WHERE src=? AND acked_ns IS NULL", (src,)).fetchone()
+            if pend and pend[0] == "reset":
+                print(f"[cmd] 측정 {'켜기' if on else '끄기'} 거부: 초기화 {pend[1]} 가"
+                      " 아직 전달 대기 중", flush=True)
+                return
             con.execute(
                 "INSERT OR REPLACE INTO pending_cmd(src,cmd,cmd_id,created_ns,acked_ns)"
                 " VALUES(?,?,?,?,NULL)",
