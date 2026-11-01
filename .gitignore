@@ -22,3 +22,10 @@
 *.rdb
 *.bak
 *.log
+
+# 측정 산출물 — 저장소에 넣지 않는다 (수십~수백 MB)
+/probe/live/
+/probe/data/
+/probe/export/
+/probe/log/
+/probe/archive/
